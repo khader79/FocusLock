@@ -1,0 +1,10 @@
+node_modules
+dist
+out
+build
+coverage
+.dart_tool
+apps/mobile
+android
+ios
+pnpm-lock.yaml

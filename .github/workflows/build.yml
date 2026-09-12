@@ -1,0 +1,156 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: '12.4.1'
+  NODE_VERSION: '20'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  core:
+    name: core (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @focuslock/core
+        run: pnpm -F @focuslock/core build
+
+      - name: Test @focuslock/core
+        run: pnpm -F @focuslock/core test
+
+      - name: Test @focuslock/server
+        run: pnpm -F @focuslock/server test
+
+      - name: Upload core dist (consumed by the desktop build)
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-dist
+          path: packages/core/dist
+          if-no-files-found: error
+
+  desktop:
+    name: desktop (${{ matrix.os }})
+    needs: core
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `electron-vite` bundles @focuslock/core from its build output, so the
+      # dist produced in the `core` job must be present before compiling.
+      - name: Restore @focuslock/core dist
+        uses: actions/download-artifact@v4
+        with:
+          name: core-dist
+          path: packages/core
+
+      - name: Build desktop app
+        run: pnpm -F @focuslock/desktop build
+
+      # NOTE: this compiles the app bundles per OS. Real installers (NSIS,
+      # dmg, AppImage/AppImage deb) still need electron-builder configured.
+      - name: Package desktop output
+        working-directory: apps/desktop
+        run: tar -czf desktop-${{ matrix.os }}.tar.gz out
+
+      - name: Upload desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: apps/desktop/desktop-${{ matrix.os }}.tar.gz
+          if-no-files-found: error
+
+  mobile:
+    name: mobile (apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Dart dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+
+      - name: Build debug APK
+        working-directory: apps/mobile
+        run: flutter build apk --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-apk
+          path: apps/mobile/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: [desktop, mobile]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub release and upload files
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: |
+            desktop-*/desktop-*.tar.gz
+            mobile-apk/*
