@@ -8,7 +8,8 @@ class Blocklist {
 
     /**
      * Reads assets/blocklist.txt and rebuilds the set. One domain per line;
-     * lines starting with '#' and blank lines are ignored.
+     * lines starting with '#' and blank lines are ignored. Any user-added
+     * custom sites / enabled category patterns are merged in on top.
      */
     @Synchronized
     fun load(context: Context) {
@@ -26,6 +27,7 @@ class Blocklist {
             }
             next.add(line)
         }
+        next.addAll(RuleStore.allDomains(context))
 
         domains.clear()
         domains.addAll(next)

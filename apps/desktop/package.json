@@ -7,9 +7,33 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
+    "pack": "pnpm run build && electron-builder --dir",
+    "pack:win": "pnpm run build && electron-builder --win",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
+    "bench": "vitest bench --run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "build": {
+    "appId": "app.focuslock.desktop",
+    "productName": "FocusLock",
+    "asar": true,
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
     "@focuslock/core": "workspace:*",
@@ -22,6 +46,7 @@
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
     "electron": "^30.0.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^3.0.0",
     "typescript": "^5.8.0",
     "vite": "^6.0.0"

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
+import { ensureBlockerAlive } from './blocker'
 
 export const WATCHDOG_INTERVAL_MS = 5_000
 
@@ -95,23 +96,42 @@ function ensureSingleInstance(): void {
   writeFileSync(pidFile, String(currentPid), 'utf8')
 }
 
+function onExit(): void {
+  writeLog('process "exit" event fired -> restarting app')
+  restartApp()
+}
+
+function onSigTerm(): void {
+  writeLog('SIGTERM received -> restarting app')
+  restartApp()
+  process.exit(0)
+}
+
+function onSigInt(): void {
+  writeLog('SIGINT received -> restarting app')
+  restartApp()
+  process.exit(0)
+}
+
 function registerRestartHandlers(): void {
-  process.on('exit', () => {
-    writeLog('process "exit" event fired -> restarting app')
-    restartApp()
-  })
+  process.on('exit', onExit)
+  process.on('SIGTERM', onSigTerm)
+  process.on('SIGINT', onSigInt)
+}
 
-  process.on('SIGTERM', () => {
-    writeLog('SIGTERM received -> restarting app')
-    restartApp()
-    process.exit(0)
-  })
+// Called by the tray "Quit" flow right before app.quit(): disarms every
+// restart hook so the intentional quit stays dead instead of being
+// resurrected by the watchdog.
+export function stopWatchdog(): void {
+  if (watchdogTimer !== null) {
+    clearInterval(watchdogTimer)
+    watchdogTimer = null
+  }
 
-  process.on('SIGINT', () => {
-    writeLog('SIGINT received -> restarting app')
-    restartApp()
-    process.exit(0)
-  })
+  process.removeListener('exit', onExit)
+  process.removeListener('SIGTERM', onSigTerm)
+  process.removeListener('SIGINT', onSigInt)
+  writeLog('watchdog stopped (intentional quit)')
 }
 
 // NOTE: On Windows a hard kill (Task Manager "End process", `taskkill /F`)
@@ -130,6 +150,9 @@ export function startWatchdog(): NodeJS.Timeout {
 
   watchdogTimer = setInterval(() => {
     ensureSingleInstance()
+    // The blocker thread runs fully independently of any window; if it died,
+    // bring it straight back so blocking keeps working.
+    ensureBlockerAlive()
   }, WATCHDOG_INTERVAL_MS)
 
   return watchdogTimer

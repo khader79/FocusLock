@@ -1,151 +1,142 @@
-import { readFile, writeFile } from 'node:fs/promises'
-import { EOL, platform } from 'node:os'
 import { join } from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { app } from 'electron'
-
-const FOCUSLOCK_START = '# === FOCUSLOCK START ==='
-const FOCUSLOCK_END = '# === FOCUSLOCK END ==='
+import { hostsFilePath } from './blocker-core'
+import { assertValidChallengeToken } from './protected-actions'
 
 export const REFRESH_INTERVAL_MS = 30_000
 
-export function hostsFilePath(): string {
-  if (platform() === 'win32') {
-    return 'C:\\Windows\\System32\\drivers\\etc\\hosts'
-  }
+// Keep the original helper names available to callers that used them before
+// the worker refactor.
+export {
+  applyHostsToFile as applyHosts,
+  buildBlock,
+  computeEffectiveDomains,
+  hostsFilePath,
+  parseBlocklist,
+  readBlocklistFile,
+  removeBlock,
+} from './blocker-core'
+export type { Category } from './blocker-core'
 
-  return '/etc/hosts'
+let worker: Worker | null = null
+let stopping = false
+
+function spawnWorker(): Worker {
+  const w = new Worker(join(__dirname, 'blocker-worker.js'), {
+    workerData: {
+      blocklistPath: join(app.getPath('userData'), 'blocklist.txt'),
+      categoriesPath: join(app.getPath('userData'), 'categories.json'),
+      hostsPath: hostsFilePath(),
+      refreshIntervalMs: REFRESH_INTERVAL_MS,
+    },
+  })
+
+  w.on('error', (err) => {
+    console.error('[blocker] worker error:', err)
+  })
+
+  w.on('exit', (code) => {
+    if (worker === w) {
+      worker = null
+    }
+    if (!stopping) {
+      console.error(`[blocker] worker exited unexpectedly (code ${code}), will respawn`)
+    }
+  })
+
+  return w
 }
 
-export function parseBlocklist(raw: string): string[] {
-  const seen = new Set<string>()
-  const domains: string[] = []
-
-  for (const rawLine of raw.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (line === '' || line.startsWith('#') || line.includes(' ') || line.includes('\t')) {
-      continue
-    }
-
-    const lower = line.toLowerCase()
-    if (!seen.has(lower)) {
-      seen.add(lower)
-      domains.push(lower)
-    }
+/**
+ * Starts the background blocker thread. Runs before any window is created and
+ * keeps updating the hosts file while every window is hidden/minimized/closed.
+ * Resolves once the worker has completed its first hosts write (or failed it).
+ */
+export async function installBlocker(): Promise<void> {
+  if (worker !== null) {
+    return
   }
 
-  return domains
-}
+  const w = spawnWorker()
+  worker = w
 
-export async function loadBlocklist(basePath = app.getPath('userData')): Promise<string[]> {
-  const filePath = join(basePath, 'blocklist.txt')
-
-  // Reading from userData needs no elevated privileges.
-  try {
-    return parseBlocklist(await readFile(filePath, 'utf8'))
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') {
-      return []
-    }
-
-    throw new Error(`Failed to read blocklist at "${filePath}": ${String(err)}`)
-  }
-}
-
-export function removeBlock(content: string): string {
-  const lines = content.split(/\r?\n/)
-
-  const startIndex = lines.findIndex((line) => line.trim() === FOCUSLOCK_START)
-  if (startIndex === -1) {
-    return content
-  }
-
-  const endIndex = lines.findIndex((line) => line.trim() === FOCUSLOCK_END)
-  if (endIndex === -1 || endIndex < startIndex) {
-    return lines.slice(0, startIndex).join(EOL)
-  }
-
-  return [...lines.slice(0, startIndex), ...lines.slice(endIndex + 1)].join(EOL)
-}
-
-export function buildBlock(domains: string[]): string {
-  const lines: string[] = [FOCUSLOCK_START]
-
-  for (const domain of domains) {
-    lines.push(`0.0.0.0 ${domain}`, `:: ${domain}`)
-  }
-
-  lines.push(FOCUSLOCK_END)
-
-  return lines.join(EOL)
-}
-
-export async function applyHosts(domains: string[], targetPath = hostsFilePath()): Promise<void> {
-  const normalized = new Set<string>()
-  for (const domain of domains) {
-    const lower = domain.trim().toLowerCase()
-    if (lower !== '' && !lower.includes(' ') && !lower.includes('\t') && !lower.includes('#')) {
-      normalized.add(lower)
-    }
-  }
-
-  // Reading the system hosts file needs no elevated privileges.
-  let content: string
-  try {
-    content = await readFile(targetPath, 'utf8')
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code !== 'ENOENT') {
-      throw new Error(`Failed to read hosts file at "${targetPath}": ${String(err)}`)
-    }
-    content = ''
-  }
-
-  if (content.charCodeAt(0) === 0xfeff) {
-    content = content.slice(1)
-  }
-
-  const withoutBlock = removeBlock(content)
-  const separator = withoutBlock.trimEnd() === '' ? '' : EOL
-  const nextContents = `${withoutBlock.trimEnd()}${separator}${buildBlock([...normalized])}${EOL}`
-
-  // === ADMIN REQUIRED ===
-  // Writing to the system hosts file needs elevated privileges:
-  //  - Windows: the app must be started as Administrator (UAC elevation).
-  //  - macOS/Linux: the app must be started with sudo.
-  // With no elevation this writeFile rejects with EACCES/EPERM, so the
-  // app cannot actually block anything.
-  try {
-    await writeFile(targetPath, nextContents, 'utf8')
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'EACCES' || code === 'EPERM') {
-      throw new Error(
-        `Not enough permissions to write the hosts file at "${targetPath}". ` +
-          'Run the app with administrator privileges (Windows) or sudo (macOS/Linux).',
-      )
-    }
-
-    throw new Error(`Failed to write hosts file at "${targetPath}": ${String(err)}`)
-  }
-}
-
-export async function installBlocker(): Promise<NodeJS.Timeout> {
-  try {
-    await applyHosts(await loadBlocklist())
-  } catch (err) {
-    console.error('[blocker] hosts update failed (check privileges):', err)
-  }
-
-  const timer = setInterval(() => {
-    void (async () => {
-      try {
-        await applyHosts(await loadBlocklist())
-      } catch (err) {
-        console.error('[blocker] hosts refresh failed (check privileges):', err)
+  await new Promise<void>((resolve) => {
+    const onMessage = (message: { type: string }): void => {
+      if (message.type === 'applied' || message.type === 'error') {
+        w.off('message', onMessage)
+        resolve()
       }
-    })()
-  }, REFRESH_INTERVAL_MS)
+    }
+    w.on('message', onMessage)
 
-  return timer
+    // Safety timeout so startup is never blocked by a stuck worker.
+    const timer = setTimeout(() => {
+      w.off('message', onMessage)
+      resolve()
+    }, 10_000)
+    timer.unref?.()
+  })
+}
+
+/**
+ * Called by the watchdog on every tick: if the blocker thread died, respawns
+ * it so blocking continues no matter what the UI is doing.
+ */
+export function ensureBlockerAlive(): void {
+  if (stopping) {
+    return
+  }
+
+  if (worker === null) {
+    console.warn('[blocker] worker missing, respawning')
+    worker = spawnWorker()
+  }
+}
+
+/**
+ * Asks the worker to immediately re-read the blocklist/categories and rewrite
+ * the hosts file. Used by protected executors right after they edit those
+ * files, so changes take effect without waiting for the next interval tick.
+ */
+export function requestBlockerApply(): void {
+  worker?.postMessage({ type: 'apply' })
+}
+
+/**
+ * Stops the background blocker. Protected entry point: the challenge token must
+ * be a valid (unexpired) JWT minted for the "quit" or "uninstall" action.
+ */
+export function stopBlocker(challengeToken: string): void {
+  const claims = assertValidChallengeToken(challengeToken)
+  if (claims.action !== 'quit' && claims.action !== 'uninstall') {
+    throw new Error(
+      `Challenge token was minted for "${claims.action}"; ` +
+        'only "quit" and "uninstall" may stop the blocker.',
+    )
+  }
+
+  if (stopping) {
+    return
+  }
+  stopping = true
+
+  const w = worker
+  worker = null
+  if (w === null) {
+    return
+  }
+
+  w.postMessage({ type: 'stop' })
+
+  // Give the worker a brief moment to exit cleanly, then force-terminate so an
+  // unresponsive thread can never keep the app alive.
+  const forcedExit = setTimeout(() => {
+    void w.terminate().catch(() => undefined)
+  }, 2_000)
+  forcedExit.unref?.()
+
+  w.on('exit', () => {
+    clearTimeout(forcedExit)
+  })
 }

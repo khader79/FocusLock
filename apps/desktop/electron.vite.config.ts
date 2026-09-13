@@ -5,9 +5,25 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: ['@focuslock/core'] })],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          'blocker-worker': resolve('src/main/blocker-worker.ts'),
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin({ exclude: ['@focuslock/core'] })],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/preload/index.ts'),
+          'challenge-modal': resolve('src/preload/challenge-modal.ts'),
+        },
+      },
+    },
   },
   renderer: {
     resolve: {

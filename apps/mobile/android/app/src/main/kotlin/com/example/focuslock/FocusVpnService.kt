@@ -21,6 +21,7 @@ class FocusVpnService : VpnService() {
     companion object {
         const val ACTION_START = "com.example.focuslock.action.START"
         const val ACTION_STOP = "com.example.focuslock.action.STOP"
+        const val ACTION_RECONFIGURE = "com.example.focuslock.action.RECONFIGURE"
 
         private const val CHANNEL_ID = "focuslock_vpn"
         private const val NOTIFICATION_ID = 1
@@ -36,12 +37,32 @@ class FocusVpnService : VpnService() {
 
     private val running = AtomicBoolean(false)
     private val blocklist = Blocklist()
+
+    /** True when the tunnel is limited to blocked apps whose traffic we drop. */
+    @Volatile
+    private var quarantineActive = false
+
+    /** Last time a block was counted, to dedupe the "blocked today" counter. */
+    @Volatile
+    private var lastBlockCountedAt = 0L
+
     private var tunnel: ParcelFileDescriptor? = null
     private var worker: Thread? = null
+
+    /** True when the session is active AND not paused (i.e. blocking). */
+    private fun blockingEnabled(): Boolean {
+        return !ProtectionStore.isPaused(this)
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> stopVpn()
+            ACTION_RECONFIGURE -> {
+                // Pick up the latest blocked-app list (added/removed via
+                // MethodChannel) and rebuild the tunnel.
+                stopWorker()
+                startVpn()
+            }
             else -> startVpn()
         }
         return START_STICKY
@@ -61,13 +82,31 @@ class FocusVpnService : VpnService() {
             return
         }
 
-        val established = Builder()
+        val builder = Builder()
             .setSession("FocusLock")
             .addAddress(CLIENT_ADDRESS, CLIENT_PREFIX)
             .addRoute("0.0.0.0", 0)
             .addDnsServer(DNS_SERVER)
             .setMtu(MTU)
-            .establish()
+
+        // App-blocking fallback: only the blocked packages ride the tunnel and
+        // every packet they send is dropped, so their network dies while all
+        // other apps bypass the VPN untouched. Requires Android 11+.
+        val blockedPackages = AppBlocker.readBlockedPackages(this)
+        quarantineActive = blockedPackages.isNotEmpty() &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        if (quarantineActive) {
+            for (pkg in blockedPackages) {
+                try {
+                    builder.addAllowedApplication(pkg)
+                } catch (_: Exception) {
+                    // Package uninstalled or not routable; the remaining ones
+                    // still get quarantined.
+                }
+            }
+        }
+
+        val established = builder.establish()
 
         if (established == null) {
             stopSelf()
@@ -76,6 +115,7 @@ class FocusVpnService : VpnService() {
 
         tunnel = established
         running.set(true)
+        ProtectionStore.setActive(this, true)
         startAsForeground()
 
         worker = Thread(
@@ -103,6 +143,10 @@ class FocusVpnService : VpnService() {
             if (read == 0) {
                 continue
             }
+            if (quarantineActive) {
+                // Blocked-app traffic: drain and drop without answering.
+                continue
+            }
 
             val packet = buffer.copyOf(read)
             val replacement = handlePacket(packet)
@@ -119,6 +163,11 @@ class FocusVpnService : VpnService() {
 
     private fun handlePacket(packet: ByteArray): ByteArray {
         if (packet.size < IP_HEADER_LENGTH) {
+            return packet
+        }
+
+        // Paused sessions let blocked domains resolve again.
+        if (!blockingEnabled()) {
             return packet
         }
 
@@ -149,8 +198,20 @@ class FocusVpnService : VpnService() {
             return packet
         }
 
+        countBlock()
         val nxDomain = DnsPacket.buildNxDomainResponse(dns, question)
         return buildDnsResponsePacket(packet, headerLength, nxDomain)
+    }
+
+    /** Counts a blocked domain, at most once per second regardless of fan-out. */
+    private fun countBlock() {
+        val now = System.currentTimeMillis()
+        if (now - lastBlockCountedAt < 1_000L) {
+            return
+        }
+        lastBlockCountedAt = now
+        ProtectionStore.incrementBlocked(this)
+        ProtectionStore.touchLastUpdate(this)
     }
 
     private fun buildDnsResponsePacket(
@@ -276,9 +337,12 @@ class FocusVpnService : VpnService() {
 
     private fun stopVpn() {
         if (!running.get()) {
+            quarantineActive = false
             return
         }
         stopWorker()
+        quarantineActive = false
+        ProtectionStore.setActive(this, false)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

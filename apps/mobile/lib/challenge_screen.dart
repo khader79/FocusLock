@@ -14,7 +14,10 @@ class ChallengeScreen extends StatefulWidget {
   const ChallengeScreen({super.key, required this.challenge, this.onFinished});
 
   final Challenge challenge;
-  final VoidCallback? onFinished;
+
+  /// Called with the completed typed text when the user leaves the success
+  /// state. Used by the host to verify natively and apply the toggle.
+  final ValueChanged<String>? onFinished;
 
   @override
   State<ChallengeScreen> createState() => _ChallengeScreenState();
@@ -158,7 +161,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                 backgroundColor: _accent,
                 padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
               ),
-              onPressed: widget.onFinished,
+              onPressed: () => widget.onFinished?.call(_typed),
               child: const Text(
                 'العودة للبداية',
                 style: TextStyle(color: Colors.white, fontSize: 18),
