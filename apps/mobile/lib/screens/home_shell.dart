@@ -21,19 +21,28 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+  final List<Widget?> _pages = List<Widget?>.filled(5, null);
+
+  Widget _page(int index) {
+    // Build each tab lazily on first visit so startup stays light (notably the
+    // apps tab, which lists every installed app over the platform channel).
+    return _pages[index] ??= switch (index) {
+      0 => DashboardScreen(onPauseRequested: widget.onPauseRequested),
+      1 => const WebsitesScreen(),
+      2 => const AppsScreen(),
+      3 => const CategoriesScreen(),
+      4 => const SettingsScreen(),
+      _ => const SizedBox.shrink(),
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> pages = <Widget>[
-      DashboardScreen(onPauseRequested: widget.onPauseRequested),
-      const WebsitesScreen(),
-      const AppsScreen(),
-      const CategoriesScreen(),
-      const SettingsScreen(),
-    ];
-
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: IndexedStack(
+        index: _index,
+        children: List<Widget>.generate(5, _page),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (index) => setState(() => _index = index),

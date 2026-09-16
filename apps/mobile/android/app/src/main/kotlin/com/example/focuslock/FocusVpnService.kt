@@ -13,8 +13,18 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Local VPN that tunnels all traffic and answers DNS queries for blocked
- * domains with NXDOMAIN, so blocked sites cannot be resolved.
+ * Local VPN that tunnels all traffic and filters it in three layers:
+ *
+ *  1. DNS: blocked domains get an NXDOMAIN answer, so they cannot resolve.
+ *  2. HTTPS: the TLS ClientHello of every TCP:443 connection is inspected and
+ *     its SNI hostname is matched against the same blocklist; blocked
+ *     handshakes are dropped before any content flows.
+ *  3. QUIC: UDP to :443 is dropped so HTTP/3 applications fall back to
+ *     plain TLS over TCP, where the SNI filter can see them.
+ *
+ * When the sticky strict mode (الوضع الصارم) is armed, filtering cannot be
+ * paused and the tunnel is set as the Android always-on VPN with lockdown, so
+ * every connection must cross this filter.
  */
 class FocusVpnService : VpnService() {
 
@@ -31,8 +41,13 @@ class FocusVpnService : VpnService() {
         private const val MTU = 1280
         private const val IP_HEADER_LENGTH = 20
         private const val UDP_HEADER_LENGTH = 8
+        private const val TCP_PROTOCOL = 6
         private const val UDP_PROTOCOL = 17
         private const val DNS_PORT = 53
+        private const val HTTPS_PORT = 443
+        private const val TLS_HANDSHAKE = 0x16
+        private const val TLS_CLIENT_HELLO = 0x01
+        private const val TLS_EXT_SERVER_NAME = 0x0000
     }
 
     private val running = AtomicBoolean(false)
@@ -49,9 +64,10 @@ class FocusVpnService : VpnService() {
     private var tunnel: ParcelFileDescriptor? = null
     private var worker: Thread? = null
 
-    /** True when the session is active AND not paused (i.e. blocking). */
+    /** True when the session is active AND not paused (i.e. blocking) — or when
+     *  the sticky strict mode is armed, which never pauses. */
     private fun blockingEnabled(): Boolean {
-        return !ProtectionStore.isPaused(this)
+        return !ProtectionStore.isPaused(this) || ProtectionStore.isGuard(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -106,6 +122,8 @@ class FocusVpnService : VpnService() {
             }
         }
 
+        // Strict mode: the tunnel owns the whole route even if the VPN was
+        // revoked/restarted, so filtering is always in the path.
         val established = builder.establish()
 
         if (established == null) {
@@ -150,6 +168,10 @@ class FocusVpnService : VpnService() {
 
             val packet = buffer.copyOf(read)
             val replacement = handlePacket(packet)
+            if (replacement == null) {
+                // Blocked SNI handshake or UDP:443 (QUIC): drop silently.
+                continue
+            }
             try {
                 output.write(replacement)
                 output.flush()
@@ -161,33 +183,48 @@ class FocusVpnService : VpnService() {
         stopVpn()
     }
 
-    private fun handlePacket(packet: ByteArray): ByteArray {
+    /** Returns the (possibly rewritten) packet, or null when it must be
+     *  dropped. */
+    private fun handlePacket(packet: ByteArray): ByteArray? {
         if (packet.size < IP_HEADER_LENGTH) {
             return packet
         }
 
-        // Paused sessions let blocked domains resolve again.
+        // Paused sessions let blocked domains resolve again — unless the strict
+        // mode is armed, in which case nothing may be un-paused anyway.
         if (!blockingEnabled()) {
             return packet
         }
 
         val version = (packet[0].toInt() and 0xFF) ushr 4
         val headerLength = (packet[0].toInt() and 0x0F) shl 2
-        if (version != 4 || headerLength < IP_HEADER_LENGTH ||
-            headerLength + UDP_HEADER_LENGTH > packet.size
-        ) {
+        if (version != 4 || headerLength < IP_HEADER_LENGTH) {
             return packet
         }
 
-        if ((packet[9].toInt() and 0xFF) != UDP_PROTOCOL) {
+        val protocol = packet[9].toInt() and 0xFF
+        return when (protocol) {
+            UDP_PROTOCOL -> handleUdp(packet, headerLength)
+            TCP_PROTOCOL -> handleTcp(packet, headerLength)
+            else -> packet
+        }
+    }
+
+    private fun handleUdp(packet: ByteArray, ipHeaderLength: Int): ByteArray? {
+        if (ipHeaderLength + UDP_HEADER_LENGTH > packet.size) {
+            return packet
+        }
+        val dstPort = DnsPacket.getU16(packet, ipHeaderLength + 2)
+        if (dstPort == HTTPS_PORT) {
+            // QUIC (HTTP/3) carries no inspectable SNI; dropping it forces the
+            // app to retry over TLS-on-TCP so [handleTcp] can filter it.
+            return null
+        }
+        if (dstPort != DNS_PORT) {
             return packet
         }
 
-        if (DnsPacket.getU16(packet, headerLength + 2) != DNS_PORT) {
-            return packet
-        }
-
-        val dnsStart = headerLength + UDP_HEADER_LENGTH
+        val dnsStart = ipHeaderLength + UDP_HEADER_LENGTH
         val dns = packet.copyOfRange(dnsStart, packet.size)
         if (!DnsPacket.isQuery(dns)) {
             return packet
@@ -200,7 +237,119 @@ class FocusVpnService : VpnService() {
 
         countBlock()
         val nxDomain = DnsPacket.buildNxDomainResponse(dns, question)
-        return buildDnsResponsePacket(packet, headerLength, nxDomain)
+        return buildDnsResponsePacket(packet, ipHeaderLength, nxDomain)
+    }
+
+    private fun handleTcp(packet: ByteArray, ipHeaderLength: Int): ByteArray? {
+        // Only connections whose TLS ClientHello carries a blocked hostname are
+        // dropped; everything else is forwarded untouched.
+        val sni = readSni(packet, ipHeaderLength) ?: return packet
+        return if (blocklist.isBlocked(sni)) null else packet
+    }
+
+    /**
+     * Extracts the server_name (SNI) from a TLS ClientHello carried in the
+     * first TCP segment of an outbound connection to :443. Returns null when
+     * the segment does not contain a complete ClientHello (a split handshake
+     * is forwarded, which is rare for ClientHello packets).
+     */
+    private fun readSni(packet: ByteArray, ipHeaderLength: Int): String? {
+        if (packet.size < ipHeaderLength + 20) {
+            return null
+        }
+        val tcpStart = ipHeaderLength
+        val dstPort = DnsPacket.getU16(packet, tcpStart + 2)
+        if (dstPort != HTTPS_PORT) {
+            return null
+        }
+        val dataOffset = ((packet[tcpStart + 12].toInt() and 0xF0) ushr 4) * 4
+        val payload = tcpStart + dataOffset
+
+        if (payload + 5 > packet.size) {
+            return null
+        }
+        if (packet[payload].toInt() and 0xFF != TLS_HANDSHAKE) {
+            return null
+        }
+
+        val recordLength = DnsPacket.getU16(packet, payload + 3)
+        val recordEnd = payload + 5 + recordLength
+        if (recordEnd > packet.size) {
+            return null
+        }
+
+        val handshake = payload + 5
+        if (handshake + 4 > recordEnd) {
+            return null
+        }
+        if (packet[handshake].toInt() and 0xFF != TLS_CLIENT_HELLO) {
+            return null
+        }
+
+        val body = handshake + 4
+        var offset = body
+
+        fun u8(at: Int): Int = if (at in 0 until packet.size) packet[at].toInt() and 0xFF else -1
+        fun u16(at: Int): Int =
+            if (at >= 0 && at + 1 < packet.size) DnsPacket.getU16(packet, at) else -1
+
+        // client_version (2) + random (32)
+        if (u8(offset) < 0) return null
+        offset += 34
+
+        // session_id
+        val sessionIdLen = u8(offset)
+        if (sessionIdLen < 0) return null
+        offset += 1 + sessionIdLen
+
+        // cipher_suites
+        val cipherLen = u16(offset)
+        if (cipherLen < 0) return null
+        offset += 2 + cipherLen
+
+        // compression_methods
+        val compressionLen = u8(offset)
+        if (compressionLen < 0) return null
+        offset += 1 + compressionLen
+
+        // extensions
+        if (offset + 2 > packet.size) return null
+        val extensionsLength = u16(offset)
+        if (extensionsLength < 0) return null
+        offset += 2
+        val extensionsEnd = offset + extensionsLength
+        if (extensionsEnd > packet.size) return null
+
+        while (offset + 4 <= extensionsEnd) {
+            val type = u16(offset)
+            val extLength = u16(offset + 2)
+            if (type < 0 || extLength < 0) return null
+
+            val data = offset + 4
+            if (type == TLS_EXT_SERVER_NAME) {
+                if (data + 2 > packet.size) return null
+                val listLength = u16(data)
+                if (listLength < 0) return null
+                var pos = data + 2
+                if (pos + 1 > packet.size) return null
+                val nameType = u8(pos)
+                if (nameType < 0) return null
+                if (nameType == 0) {
+                    if (pos + 3 > packet.size) return null
+                    val nameLength = u16(pos + 1)
+                    if (nameLength < 0) return null
+                    if (pos + 3 + nameLength > packet.size) return null
+                    val builder = StringBuilder(nameLength)
+                    for (i in 0 until nameLength) {
+                        builder.append((packet[pos + 3 + i].toInt() and 0xFF).toChar())
+                    }
+                    return builder.toString().lowercase()
+                }
+            }
+
+            offset = data + extLength
+        }
+        return null
     }
 
     /** Counts a blocked domain, at most once per second regardless of fan-out. */
@@ -325,9 +474,13 @@ class FocusVpnService : VpnService() {
         }
         manager.createNotificationChannel(channel)
 
+        val guard = ProtectionStore.isGuard(this)
         val notification = Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("FocusLock")
-            .setContentText("Focus mode active - distractions blocked")
+            .setContentTitle(if (guard) "FocusLock - وضع صارم مفعّل" else "FocusLock")
+            .setContentText(
+                if (guard) "الحماية الإباحية مفعّلة بشكل دائم"
+                else "Focus mode active - distractions blocked",
+            )
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setOngoing(true)
             .build()

@@ -70,6 +70,20 @@ class ProtectionBridge {
       <String, Object?>{'difficulty': difficulty},
     );
   }
+
+  /// Arms the one-way strict mode (cannot be disabled from the device).
+  /// Returns the applied DPM flags: uninstallBlocked / lockdownVpn / guard.
+  static Future<Map<Object?, Object?>> enableGuard() async {
+    return await _channel.invokeMapMethod<Object?, Object?>('setGuard') ??
+        const <Object?, Object?>{};
+  }
+
+  /// Whether the strict mode is currently armed.
+  static Future<bool> isGuarded() async {
+    final map = await _channel.invokeMapMethod<Object?, Object?>('guardState') ??
+        const <Object?, Object?>{};
+    return map['guard'] as bool? ?? false;
+  }
 }
 
 /// Bridge for the notification-launch action ('focuslock/launch').
@@ -158,10 +172,11 @@ class AppsBridge {
   static Future<List<FocusApp>> listInstalledApps() async {
     final raw = await _channel.invokeListMethod<Map<Object?, Object?>>('listInstalledApps');
     return (raw ?? <Map<Object?, Object?>>[]).map((entry) {
+      final Object? icon = entry['icon'];
       return FocusApp(
         name: entry['name']?.toString() ?? '',
         packageName: entry['packageName']?.toString() ?? '',
-        icon: entry['icon'] is Uint8List ? entry['icon'] as Uint8List : null,
+        icon: icon is Uint8List && icon.isNotEmpty ? icon : null,
       );
     }).toList();
   }

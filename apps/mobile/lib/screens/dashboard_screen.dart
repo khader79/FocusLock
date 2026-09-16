@@ -54,12 +54,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 16),
           _StatsGrid(focus: focus),
           const SizedBox(height: 16),
-          _Controls(
-            toggling: _toggling,
-            onStart: _startSession,
-            onPause: _pauseFlow,
-            onStop: _stopSession,
-          ),
+          if (focus?.guard ?? false)
+            const _GuardBanner()
+          else
+            _Controls(
+              toggling: _toggling,
+              onStart: _startSession,
+              onPause: _pauseFlow,
+              onStop: _stopSession,
+            ),
           const SizedBox(height: 16),
           _DifficultySelector(
             difficulty: state.focus?.difficulty ?? 3,
@@ -81,12 +84,20 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool guarded = focus?.guard ?? false;
     final bool active = focus?.active ?? false;
-    final String subtitle = active
-        ? 'الحماية نشطة الآن'
-        : focus == null
-            ? 'تلمس شاشة الحماية لبدء الجلسة'
-            : 'مؤقتًا${state.sync.configured ? ', جارٍ المزامنة' : ''}';
+    final String title = guarded
+        ? 'وضع صارم'
+        : active
+            ? 'نشطة'
+            : (focus == null ? 'متوقفة' : 'موقوفة');
+    final String subtitle = guarded
+        ? 'الحماية دائمة ولا يمكن إيقافها'
+        : active
+            ? 'الحماية نشطة الآن'
+            : focus == null
+                ? 'تلمس شاشة الحماية لبدء الجلسة'
+                : 'مؤقتًا${state.sync.configured ? ', جارٍ المزامنة' : ''}';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -94,7 +105,7 @@ class _StatusCard extends StatelessWidget {
         color: kSurface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: active ? kSuccess.withValues(alpha: 0.5) : kBorder,
+          color: guarded ? kError : active ? kSuccess.withValues(alpha: 0.5) : kBorder,
         ),
       ),
       child: Row(
@@ -104,7 +115,7 @@ class _StatusCard extends StatelessWidget {
             height: 14,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: active ? kSuccess : (focus == null ? kMuted : kError),
+              color: guarded ? kError : active ? kSuccess : (focus == null ? kMuted : kError),
             ),
           ),
           const SizedBox(width: 12),
@@ -112,7 +123,7 @@ class _StatusCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                active ? 'نشطة' : (focus == null ? 'متوقفة' : 'موقوفة'),
+                title,
                 style: const TextStyle(
                   color: kText,
                   fontSize: 20,
@@ -320,6 +331,40 @@ class _SyncBar extends StatelessWidget {
                 configured ? 'متصل بالمزامنة' : 'غير مهيأ للمزامنة',
                 style: TextStyle(color: configured ? kText : kMuted, fontSize: 15),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown instead of the session controls while the strict mode is armed,
+/// because starting/pausing/stopping are locked by design.
+class _GuardBanner extends StatelessWidget {
+  const _GuardBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kError),
+        ),
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'الوضع الصارم مفعّل',
+              style: TextStyle(color: kError, fontSize: 17, fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'الحماية دائمة: لا إيقاف مؤقت، لا إنهاء، ولا إلغاء تثبيت. '
+              'المحتوى الإباحي محجوب بشكل دائم (DNS + HTTPS/SNI).',
+              style: TextStyle(color: kMuted, fontSize: 13),
             ),
           ],
         ),

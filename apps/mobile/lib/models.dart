@@ -13,6 +13,7 @@ class FocusState {
     required this.syncConfigured,
     required this.difficulty,
     this.lastUpdate,
+    this.guard = false,
   });
 
   factory FocusState.fromMap(Map<dynamic, dynamic> map) {
@@ -25,6 +26,7 @@ class FocusState {
       customApps: map['customApps'] as int? ?? 0,
       difficulty: map['difficulty'] as int? ?? 3,
       syncConfigured: map['syncConfigured'] as bool? ?? false,
+      guard: map['guard'] as bool? ?? false,
     );
   }
 
@@ -37,6 +39,9 @@ class FocusState {
   final int difficulty;
   final bool syncConfigured;
 
+  /// True when the one-way "strict mode" (الوضع الصارم) is armed.
+  final bool guard;
+
   bool get active => status == 'active';
 
   FocusState copyWith({
@@ -46,6 +51,7 @@ class FocusState {
     int? unlockAttempts,
     int? customSites,
     int? customApps,
+    bool? guard,
   }) {
     return FocusState(
       status: status ?? this.status,
@@ -56,6 +62,7 @@ class FocusState {
       customApps: customApps ?? this.customApps,
       syncConfigured: syncConfigured,
       difficulty: difficulty,
+      guard: guard ?? this.guard,
     );
   }
 

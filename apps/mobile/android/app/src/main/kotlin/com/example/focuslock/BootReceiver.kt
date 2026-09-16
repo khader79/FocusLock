@@ -29,6 +29,14 @@ class BootReceiver : BroadcastReceiver() {
             return
         }
 
+        // Strict mode is permanent: restart the whole pipeline, re-assert
+        // uninstall/lockdown hardening, and let GuardManager bring both the
+        // foreground service and the VPN back up.
+        if (ProtectionStore.isGuard(context)) {
+            GuardManager.enforce(context)
+            return
+        }
+
         val serviceIntent = Intent(context, FocusVpnService::class.java)
             .setAction(FocusVpnService.ACTION_START)
 

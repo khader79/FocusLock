@@ -73,6 +73,8 @@ flutter:
 
   assets:
     - assets/blocklist.txt
+    - assets/adult_domains.txt
+    - assets/adult_keywords.txt
     - assets/challenge_words.txt
 
   # To add assets to your application, add an assets section, like this:

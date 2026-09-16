@@ -1,0 +1,84 @@
+# FocusLock adult-content domain blocklist.
+# One bare domain per line (no scheme, no wildcard, no whitespace).
+# Suffix matching applies: "m.<entry>.<tld>" and "<entry>.<tld>" are both blocked.
+# Add new adult domains here; they are enforced regardless of the guard mode.
+
+# ---- tube / streaming ----
+pornhub.com
+xvideos.com
+xnxx.com
+xhamster.com
+redtube.com
+youporn.com
+tube8.com
+spankbang.com
+eporner.com
+youjizz.com
+tnaflix.com
+hclips.com
+vjav.com
+hqporner.com
+beeg.com
+drtuber.com
+manyvids.com
+pornone.com
+daftsex.com
+hardcoretube.com
+porn.com
+adultempire.com
+bangbros.com
+realitykings.com
+naughtyamerica.com
+mompov.com
+evilangel.com
+julesjordan.com
+vixen.com
+blacked.com
+tushy.com
+kink.com
+brazzers.com
+babes.com
+
+# ---- webcam / live ----
+chaturbate.com
+myfreecams.com
+stripchat.com
+livejasmin.com
+camsoda.com
+xlovecam.com
+cam4.com
+streamate.com
+jerkmate.com
+flirt4free.com
+imlive.com
+
+# ---- subscription / paywalled ----
+onlyfans.com
+fansly.com
+loyalfans.com
+clips4sale.com
+
+# ---- erotica / magazines ----
+playboy.com
+penthouse.com
+hustler.com
+
+# ---- adult search / aggregators ----
+pornmd.com
+theporndude.com
+pornve.com
+nudevista.com
+rule34.xxx
+nhentai.net
+e-hentai.org
+hanime.tv
+8muses.com
+gelbooru.com
+
+# ---- casual / hookup ----
+sex.com
+adultfriendfinder.com
+ashleymadison.com
+fling.com
+naughtydate.com
+affair.com

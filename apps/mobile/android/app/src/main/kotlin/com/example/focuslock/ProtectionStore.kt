@@ -18,6 +18,7 @@ object ProtectionStore {
 
     private const val KEY_ACTIVE = "active"
     private const val KEY_PAUSED = "paused"
+    private const val KEY_GUARD = "guard"
     private const val KEY_BLOCKED_TODAY = "blocked_today"
     private const val KEY_STATS_DAY = "stats_day"
     private const val KEY_UNLOCK_ATTEMPTS = "unlock_attempts"
@@ -51,6 +52,17 @@ object ProtectionStore {
 
     fun isPaused(context: Context): Boolean {
         return prefs(context).getBoolean(KEY_PAUSED, false)
+    }
+
+    // ---------------------------------------------------------------- guard
+
+    /** True when the sticky "strict mode" is armed (cannot be unarmed locally). */
+    fun isGuard(context: Context): Boolean {
+        return prefs(context).getBoolean(KEY_GUARD, false)
+    }
+
+    fun setGuard(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_GUARD, value).apply()
     }
 
     // ----------------------------------------------------------------- stats
@@ -157,6 +169,7 @@ object ProtectionStore {
     fun toMap(context: Context): MutableMap<String, Any?> {
         return mutableMapOf(
             "status" to if (isPaused(context)) "paused" else "active",
+            "guard" to isGuard(context),
             "blockedToday" to blockedToday(context),
             "lastUpdate" to lastUpdate(context),
             "unlockAttempts" to unlockAttempts(context),

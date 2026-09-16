@@ -6,11 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.drawable.Drawable
 import android.os.Build
-import java.io.ByteArrayOutputStream
 
 /**
  * App-level blocking on Android.
@@ -177,12 +173,10 @@ object AppBlocker {
                 continue
             }
             val name = pm.getApplicationLabel(info).toString()
-            val icon = try {
-                encodeIcon(pm.getApplicationIcon(pkg))
-            } catch (_: Exception) {
-                null
-            }
-            apps.add(AppInfo(name, pkg, icon))
+            // Icons are intentionally skipped: PNG-encoding ~150 launcher icons
+            // on the main thread froze the app on launch ("Skipped 697 frames").
+            // The Flutter UI renders a letter avatar as the fallback instead.
+            apps.add(AppInfo(name, pkg, null))
         }
         apps.sortBy { it.name.lowercase() }
         return apps
@@ -238,26 +232,6 @@ object AppBlocker {
             pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0L))
         } else {
             pm.getInstalledApplications(0)
-        }
-    }
-
-    /** Renders [drawable] into PNG bytes; returns null when it cannot be drawn. */
-    private fun encodeIcon(drawable: Drawable): ByteArray? {
-        val width = drawable.intrinsicWidth
-        val height = drawable.intrinsicHeight
-        if (width <= 0 || height <= 0) {
-            return null
-        }
-        return try {
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            drawable.setBounds(0, 0, width, height)
-            drawable.draw(canvas)
-            val out = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            out.toByteArray()
-        } catch (_: Exception) {
-            null
         }
     }
 }

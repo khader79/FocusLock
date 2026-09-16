@@ -155,12 +155,27 @@ class MainActivity : FlutterActivity() {
                 }
 
                 "stopSession" -> {
-                    startService(
-                        Intent(this, FocusLockService::class.java)
-                            .setAction(FocusLockService.ACTION_STOP),
-                    )
-                    result.success(true)
+                    // Strict mode cannot be stopped locally, ever.
+                    if (ProtectionStore.isGuard(this)) {
+                        result.error("GUARDED", "Strict mode is locked.", null)
+                    } else {
+                        startService(
+                            Intent(this, FocusLockService::class.java)
+                                .setAction(FocusLockService.ACTION_STOP),
+                        )
+                        result.success(true)
+                    }
                 }
+
+                // Arms the permanent strict mode (one-way: no local disable).
+                "setGuard" -> result.success(GuardManager.enable(this))
+
+                "guardState" -> result.success(
+                    mapOf(
+                        "guard" to ProtectionStore.isGuard(this),
+                        "deviceOwner" to AppBlocker.isDeviceOwner(this),
+                    ),
+                )
 
                 "generateChallenge" -> {
                     val difficulty = call.argument<Int>("difficulty")
@@ -192,7 +207,9 @@ class MainActivity : FlutterActivity() {
                     val ok = Core.isComplete(typed, pending.second)
                     if (ok) {
                         ProtectionStore.clearPendingChallenge(this)
-                        val paused = !ProtectionStore.isPaused(this)
+                        // Strict mode never allows pausing the filter.
+                        val guarded = ProtectionStore.isGuard(this)
+                        val paused = !guarded && !ProtectionStore.isPaused(this)
                         // The foreground service flips state + refreshes notif.
                         startService(
                             Intent(this, FocusLockService::class.java)

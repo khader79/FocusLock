@@ -27,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _saving = false;
   bool _pushing = false;
+  bool _guarding = false;
   String? _status;
 
   @override
@@ -74,6 +75,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  /// Arms the one-way strict mode after an explicit confirmation.
+  Future<void> _activateGuard() async {
+    final AppState state = context.read<AppState>();
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('تفعيل الوضع الصارم؟'),
+        content: const Text(
+          'هذا الإجراء نهائي ولا يمكن إلغاؤه من هذا الجهاز.\n\n'
+          'بعد التفعيل:\n'
+          '• لا يمكن إلغاء تثبيت FocusLock\n'
+          '• لا يمكن إيقاف الحجب أو أخذ استراحة\n'
+          '• منع الإباحية مفعّل بشكل دائم (حجب DNS + HTTPS/SNI)\n'
+          '• إذا تعطّل الـ VPN يُقطع الإنترنت كله (Lockdown)\n\n'
+          'الفك الوحيد من الجهاز غير موجود؛ الفك عبر إعادة ضبط المصنع '
+          'أو بأمر adb من حاسوبك.\n\n'
+          'هل أنت متأكد؟',
+          textAlign: TextAlign.right,
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('تراجع'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: kError),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('تفعيل نهائياً'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _guarding = true);
+    final Map<Object?, Object?> flags = await state.enableGuard();
+    if (!mounted) return;
+    setState(() => _guarding = false);
+
+    final bool uninstall = flags['uninstallBlocked'] as bool? ?? false;
+    final bool lockdown = flags['lockdownVpn'] as bool? ?? false;
+    final String message = state.guard
+        ? 'الوضع الصارم مفعّل. منع الحذف: ${uninstall ? 'مفعّل' : 'يحتاج Device Owner'}، '
+            'قفل الـ VPN: ${lockdown ? 'مفعّل' : 'يحتاج إذن VPN + Device Owner'}.'
+        : 'تعذّر التفعيل. تأكد من أنك مالك الجهاز (Device Owner).';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   @override
   void dispose() {
     _url.dispose();
@@ -92,6 +143,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
+          _GuardCard(
+            guarded: state.guard,
+            deviceOwner: state.deviceOwner,
+            busy: _guarding,
+            onActivate: _activateGuard,
+          ),
+          const SizedBox(height: 24),
           const Text('مزامنة سطح المكتب', style: TextStyle(color: kText, fontSize: 18, fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),
           const Text(
@@ -208,6 +266,123 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Strict-mode (الوضع الصارم) activation card. One-way: once armed there is
+/// no local disable path, matching the "cannot uninstall / cannot unblock"
+/// requirement.
+class _GuardCard extends StatelessWidget {
+  const _GuardCard({
+    required this.guarded,
+    required this.deviceOwner,
+    required this.busy,
+    required this.onActivate,
+  });
+
+  final bool guarded;
+  final bool deviceOwner;
+  final bool busy;
+  final VoidCallback onActivate;
+
+  @override
+  Widget build(BuildContext context) {
+    if (guarded) {
+      return Card(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: kError),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  const Icon(Icons.gpp_bad, color: kError),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'الوضع الصارم مفعّل',
+                      style: TextStyle(color: kError, fontSize: 17, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'منع المحتوى الإباحي مفعّل بشكل دائم ولا يمكن إيقافه من هذا الجهاز:\n'
+                '• حجب النطاقات الإباحية (DNS)\n'
+                '• حجب HTTPS عبر فحص SNI\n'
+                '• لا إيقاف مؤقت ولا إنهاء للجلسة\n'
+                '• منع إلغاء التثبيت + VPN بقفل كامل (Lockdown)\n\n'
+                'الفك الوحيد: إعادة ضبط المصنع أو adb من حاسوبك.',
+                style: TextStyle(color: kMuted, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final bool canArm = deviceOwner && !busy;
+    return Card(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kBorder),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(!deviceOwner ? Icons.warning_amber_outlined : Icons.gpp_maybe, color: !deviceOwner ? kError : kAccent),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'الوضع الصارم',
+                    style: TextStyle(color: kText, fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'حماية نهائية غير قابلة للإلغاء من الجهاز: منع الإباحية (DNS + SNI)، منع إلغاء التثبيت،'
+              ' وقفل الـ VPN كله. بمجرد التفعيل لا يمكن إيقافها محلياً.',
+              style: TextStyle(color: kMuted, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            if (!deviceOwner) ...<Widget>[
+              const Text(
+                'المطلوب: صيّر التطبيق مالك الجهاز أولاً عبر adb:\n'
+                'adb shell dpm set-device-owner com.example.focuslock/.AdminReceiver',
+                style: TextStyle(color: kError, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+            ],
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: canArm ? onActivate : null,
+                style: FilledButton.styleFrom(backgroundColor: kError),
+                icon: busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.lock_outline),
+                label: Text(busy ? 'جارٍ التفعيل...' : 'تفعيل الوضع الصارم نهائياً'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

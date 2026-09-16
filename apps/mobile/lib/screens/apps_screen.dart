@@ -155,7 +155,7 @@ class _AppIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget icon;
-    if (bytes is Uint8List) {
+    if (bytes is Uint8List && bytes.isNotEmpty) {
       icon = ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: Image.memory(

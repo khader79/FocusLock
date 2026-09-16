@@ -188,6 +188,17 @@ class AppState extends ChangeNotifier {
     await refresh();
   }
 
+  // --------------------------------------------------------------- strict mode
+
+  bool get guard => _focus?.guard ?? false;
+
+  /// Arms the permanent strict mode. Returns the applied DPM flags.
+  Future<Map<Object?, Object?>> enableGuard() async {
+    final Map<Object?, Object?> flags = await ProtectionBridge.enableGuard();
+    await refresh();
+    return flags;
+  }
+
   // -------------------------------------------------------------- website
 
   Future<bool> addSite(String site) async {

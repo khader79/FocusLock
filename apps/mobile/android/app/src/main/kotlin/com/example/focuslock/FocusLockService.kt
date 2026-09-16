@@ -52,6 +52,13 @@ class FocusLockService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                // The sticky strict mode is permanent: it cannot be stopped.
+                if (ProtectionStore.isGuard(this)) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForeground(NOTIFICATION_ID, buildNotification())
+                    }
+                    return START_STICKY
+                }
                 ProtectionStore.setActive(this, false)
                 stopVpn()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -66,6 +73,12 @@ class FocusLockService : Service() {
             }
 
             ACTION_SET_PAUSE -> {
+                // Strict mode ignores pause requests: filtering never relaxes.
+                if (ProtectionStore.isGuard(this)) {
+                    ProtectionStore.setPaused(this, false)
+                    refreshNotification()
+                    return START_STICKY
+                }
                 val paused = intent.getBooleanExtra(EXTRA_PAUSED, true)
                 ProtectionStore.setPaused(this, paused)
                 if (paused) {
@@ -78,13 +91,18 @@ class FocusLockService : Service() {
                 ProtectionStore.setActive(this, true)
                 startAsForeground()
                 ensureVpn()
+                if (ProtectionStore.isGuard(this)) {
+                    // Re-assert the Device Owner hardening on every start so a
+                    // failed/revoked lockdown re-arms itself.
+                    GuardManager.enforce(this, startProtection = false)
+                }
             }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        if (ProtectionStore.isActive(this)) {
+        if (ProtectionStore.isActive(this) || ProtectionStore.isGuard(this)) {
             // START_STICKY was used, so the system may restart us; keep the
             // session active unless an explicit ACTION_STOP was issued.
             startAsForeground()
@@ -121,6 +139,7 @@ class FocusLockService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        val guard = ProtectionStore.isGuard(this)
         val paused = ProtectionStore.isPaused(this)
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
@@ -131,41 +150,50 @@ class FocusLockService : Service() {
 
         builder
             .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle(if (paused) "FocusLock Paused" else "FocusLock Active")
+            .setContentTitle(
+                if (guard) "FocusLock — وضع صارم مفعّل"
+                else if (paused) "FocusLock Paused"
+                else "FocusLock Active",
+            )
             .setContentText(
-                if (paused) "Protection paused. Tap Resume to lock again."
+                if (guard) "الحماية الإباحية مفعّلة بشكل دائم — لا يمكن إيقافها"
+                else if (paused) "Protection paused. Tap Resume to lock again."
                 else "Distractions blocked. Tap Pause to take a break.",
             )
             .setOngoing(true)
 
-        // Pause (or Resume) always goes through the typing challenge.
-        val launchAction = if (paused) LAUNCH_RESUME else LAUNCH_PAUSE
-        val toggleIntent = Intent(this, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(EXTRA_LAUNCH_ACTION, launchAction)
+        // In strict mode there is no pause/resume/stop: the notification only
+        // opens the app.
+        if (!guard) {
+            // Pause (or Resume) always goes through the typing challenge.
+            val launchAction = if (paused) LAUNCH_RESUME else LAUNCH_PAUSE
+            val toggleIntent = Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_LAUNCH_ACTION, launchAction)
 
-        val togglePending = PendingIntent.getActivity(
-            this,
-            0,
-            toggleIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        builder.addAction(
-            Notification.Action.Builder(null, launchAction, togglePending).build(),
-        )
+            val togglePending = PendingIntent.getActivity(
+                this,
+                0,
+                toggleIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(
+                Notification.Action.Builder(null, launchAction, togglePending).build(),
+            )
 
-        // Stop ends the session outright.
-        val stopIntent = Intent(this, FocusLockService::class.java)
-            .setAction(ACTION_STOP)
-        val stopPending = PendingIntent.getService(
-            this,
-            1,
-            stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        builder.addAction(
-            Notification.Action.Builder(null, "Stop", stopPending).build(),
-        )
+            // Stop ends the session outright.
+            val stopIntent = Intent(this, FocusLockService::class.java)
+                .setAction(ACTION_STOP)
+            val stopPending = PendingIntent.getService(
+                this,
+                1,
+                stopIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(
+                Notification.Action.Builder(null, "Stop", stopPending).build(),
+            )
+        }
 
         val contentIntent = PendingIntent.getActivity(
             this,
