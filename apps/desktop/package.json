@@ -1,6 +1,6 @@
 {
   "name": "@focuslock/desktop",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
@@ -28,11 +28,13 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "include": "installer/uninstall.nsh"
     }
   },
   "dependencies": {

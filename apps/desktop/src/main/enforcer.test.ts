@@ -25,6 +25,7 @@ describe('enforcerDataPaths', () => {
       categoriesPath: 'C:\\Users\\me\\AppData\\Roaming\\focuslock\\categories.json',
       rulesPath: 'C:\\Users\\me\\AppData\\Roaming\\focuslock\\dns-rules.json',
       statsPath: 'C:\\Users\\me\\AppData\\Roaming\\focuslock\\dns-stats.json',
+      backupPath: 'C:\\Users\\me\\AppData\\Roaming\\focuslock\\dns-backup.json',
     })
   })
 })

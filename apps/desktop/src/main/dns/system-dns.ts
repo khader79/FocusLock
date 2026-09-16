@@ -78,11 +78,22 @@ export class SystemDnsController {
   }
 
   async configure(): Promise<void> {
-    if (await this.isConfigured()) {
-      return
-    }
     const target = await this.detectTarget()
     const current = await this.currentServers()
+    // Already routing through the local filter: nothing to do, and the
+    // original servers (backup) must not be overwritten.
+    if (current.servers.includes(LOCAL_DNS)) {
+      return
+    }
+    const existing = await this.readBackup()
+    if (existing !== null && existing.platform === this.platform && existing.target === target) {
+      // The resolver drifted away from the local filter (DHCP reconnect, user
+      // reset, another tool) while a backup still exists. Re-apply the same
+      // routing so it heals itself on the next launch, keeping the ORIGINAL
+      // servers untouched so uninstall can still restore them.
+      await this.setServers(target, [LOCAL_DNS])
+      return
+    }
     await this.writeBackup({ platform: this.platform, target, ...current })
     await this.setServers(target, [LOCAL_DNS])
   }
@@ -102,9 +113,6 @@ export class SystemDnsController {
   }
 
   async isConfigured(): Promise<boolean> {
-    if ((await this.readBackup()) !== null) {
-      return true
-    }
     try {
       const current = await this.currentServers()
       return current.servers.includes(LOCAL_DNS)

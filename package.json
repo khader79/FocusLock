@@ -1,6 +1,6 @@
 {
   "name": "focuslock",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "private": true,
   "description": "FocusLock monorepo - packages/core, apps/desktop, apps/mobile, server",
   "packageManager": "pnpm@12.4.1",

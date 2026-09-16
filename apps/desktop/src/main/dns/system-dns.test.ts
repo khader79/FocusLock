@@ -106,6 +106,38 @@ describe('SystemDnsController (windows)', () => {
     expect(hasCall(calls, 'netsh', ['interface', 'ip', 'set', 'dns', 'name=Ethernet', 'static', '8.8.8.8'])).toBe(true)
     expect(hasCall(calls, 'netsh', ['interface', 'ip', 'add', 'dns', 'name=Ethernet', '1.1.1.1'])).toBe(true)
   })
+
+  it('re-applies routing when the resolver drifted away while a backup exists', async () => {
+    const backupPath = await tempBackupPath()
+    const drift = scriptedRunner({
+      'netsh interface show interface': WINDOWS_INTERFACES,
+      'netsh interface ipv4 show dns name=Ethernet':
+        '   DNS servers configured through DHCP:  192.168.1.254',
+      'netsh interface ip set dns name=Ethernet static 127.0.0.1': '',
+    })
+    let controller = new SystemDnsController({ platform: 'win32', runner: drift.runner, backupFilePath: backupPath })
+    await controller.configure()
+    const original = await readFile(backupPath, 'utf8')
+
+    // The resolver falls back to the ISP's servers (DHCP reconnect) while the
+    // app is stopped; the backup file is still on disk from the previous run.
+    const reapply = scriptedRunner({
+      'netsh interface show interface': WINDOWS_INTERFACES,
+      'netsh interface ipv4 show dns name=Ethernet':
+        '   DNS servers configured through DHCP:  192.168.1.254',
+      'netsh interface ip set dns name=Ethernet static 127.0.0.1': '',
+    })
+    controller = new SystemDnsController({ platform: 'win32', runner: reapply.runner, backupFilePath: backupPath })
+
+    await controller.configure()
+
+    expect(
+      hasCall(reapply.calls, 'netsh', ['interface', 'ip', 'set', 'dns', 'name=Ethernet', 'static', '127.0.0.1']),
+    ).toBe(true)
+    // The original servers must survive: re-applying after a drift never
+    // overwrites the backup with the drifted (already-broken) state.
+    await expect(readFile(backupPath, 'utf8')).resolves.toBe(original)
+  })
 })
 
 describe('SystemDnsController (macOS)', () => {
@@ -220,14 +252,33 @@ describe('SystemDnsController (linux)', () => {
 })
 
 describe('SystemDnsController.isConfigured', () => {
-  it('returns true when a backup already exists', async () => {
+  it('returns true only when the current servers actually point at 127.0.0.1', async () => {
     const backupPath = await tempBackupPath()
-    const { runner } = scriptedRunner({})
-    const controller = new SystemDnsController({ platform: 'darwin', runner, backupFilePath: backupPath })
-    const { writeFile } = await import('node:fs/promises')
-    await writeFile(backupPath, JSON.stringify({ platform: 'darwin', target: 'Wi-Fi', servers: [], mode: 'dhcp' }))
+    const { runner } = scriptedRunner({
+      'netsh interface show interface': WINDOWS_INTERFACES,
+      'netsh interface ipv4 show dns name=Ethernet':
+        '   DNS servers configured through static:  127.0.0.1, 127.0.0.2',
+    })
+    const controller = new SystemDnsController({ platform: 'win32', runner, backupFilePath: backupPath })
 
     expect(await controller.isConfigured()).toBe(true)
+  })
+
+  it('returns false when a backup exists but the resolver drifted to the ISP DNS', async () => {
+    const backupPath = await tempBackupPath()
+    const { runner } = scriptedRunner({
+      'netsh interface show interface': WINDOWS_INTERFACES,
+      'netsh interface ipv4 show dns name=Ethernet':
+        '   DNS servers configured through DHCP:  10.0.0.1',
+    })
+    const controller = new SystemDnsController({ platform: 'win32', runner, backupFilePath: backupPath })
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(
+      backupPath,
+      JSON.stringify({ platform: 'win32', target: 'Ethernet', servers: ['10.0.0.1'], mode: 'dhcp' }),
+    )
+
+    expect(await controller.isConfigured()).toBe(false)
   })
 
   it('returns false when the current servers do not point at 127.0.0.1', async () => {

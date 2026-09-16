@@ -113,6 +113,13 @@ export function registerProtectedExecutors(ctx: ProtectedExecutorContext): void 
     stopBlocker(challengeToken)
     await stopEnforcementService(serviceSpec())
     await ctx.stopDns()
+    // Defensive recovery for machines upgraded from versions that changed the
+    // system resolver.  Failure to restore must never prevent quitting.
+    try {
+      await ctx.restoreSystemDns()
+    } catch (err) {
+      console.error('[dns] failed to restore legacy system DNS while quitting:', err)
+    }
     ctx.quit()
   })
 
@@ -217,15 +224,19 @@ export function registerProtectedExecutors(ctx: ProtectedExecutorContext): void 
   })
 
   registerProtectedActionExecutor('uninstall', async (_payload, challengeToken) => {
-    // Remove the sites block from the hosts file, delete every persisted rule,
-    // stop the background blocker, DNS filter and enforcement service, restore
-    // the system DNS, then leave the app for good.
+    // Stop every network-related component and restore any legacy DNS setting
+    // before removing data.  This ordering guarantees the app cannot leave a
+    // machine pointing at 127.0.0.1 after uninstall.
     await applyHosts([])
-    await wipeProtectionData()
     stopBlocker(challengeToken)
     await stopEnforcementService(serviceSpec())
     await ctx.stopDns()
-    await ctx.restoreSystemDns()
+    try {
+      await ctx.restoreSystemDns()
+    } catch (err) {
+      console.error('[dns] failed to restore legacy system DNS while uninstalling:', err)
+    }
+    await wipeProtectionData()
     ctx.quit()
   })
 }

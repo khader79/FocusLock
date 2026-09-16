@@ -153,3 +153,13 @@ export function emptyPatterns(): RulePatterns {
     exceptions: { exact: [], wildcards: [], keywords: [] },
   }
 }
+
+/** True when the rules contain at least one blocking pattern. */
+export function hasBlockingRules(patterns: RulePatterns): boolean {
+  return (
+    patterns.exact.length > 0 ||
+    patterns.wildcards.length > 0 ||
+    patterns.regexes.length > 0 ||
+    patterns.keywords.length > 0
+  )
+}

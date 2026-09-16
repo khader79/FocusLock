@@ -7,10 +7,10 @@ import { auditLog } from './audit-log'
 /**
  * Windows application blocking.
  *
- * blockApp/unblockApp gate every mutation behind a valid challenge token, then
- * apply three layers: an Image File Execution Options Debugger override, inbound
- * + outbound Windows Firewall rules, and a process watcher (500 ms) that
- * terminates the app on sight and records kills to `app-blocker-stats.json`.
+ * Application-level blocking is intentionally disabled.  Earlier builds used
+ * an Image File Execution Options registry override and a process killer; a
+ * name collision with a Windows process can break shell and network services.
+ * FocusLock is a website blocker and must not modify or terminate processes.
  *
  * Electron-free: commands run through the injectable {@link WindowsCommandRunner}
  * (reg.exe / netsh.exe / tasklist.exe) and the native file dialog is injected via
@@ -141,8 +141,6 @@ export function logAppKill(baseDir: string, processName: string, pid: number): v
 // --- IFEO + firewall layer --------------------------------------------------------
 
 const IFEO_ROOT = 'HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options'
-const IFEO_DEBUGGER = '%windir%\\System32\\systray.exe'
-
 export function ifeoKeyFor(exeName: string): string {
   return `${IFEO_ROOT}\\${exeName}`
 }
@@ -265,20 +263,6 @@ export function createProcessWatcher(options: ProcessWatcherOptions): ProcessWat
 
 let activeWatcher: ProcessWatcher | null = null
 
-function ensureWatcher(baseDir: string, scanner?: ProcessScanner): void {
-  if (activeWatcher !== null && activeWatcher.running) {
-    return
-  }
-  const watcher = createProcessWatcher({
-    intervalMs: 500,
-    scanner,
-    getBlockedExeNames: async () => readBlockedApps(baseDir).map((entry) => basename(entry.exePath)),
-    onKill: ({ name, pid }) => logAppKill(baseDir, name, pid),
-  })
-  activeWatcher = watcher
-  watcher.start()
-}
-
 function stopWatcher(): void {
   if (activeWatcher !== null) {
     activeWatcher.stop()
@@ -293,8 +277,9 @@ interface BlockAppOptions {
 }
 
 /**
- * Blocks an app: persists the entry, adds the IFEO Debugger override, blocks
- * inbound + outbound firewall traffic and starts the process watcher.
+ * Application blocking is disabled for device safety.  In particular, never
+ * allow a user-selected executable name to create a system-wide IFEO override
+ * or terminate a process: Windows services share executable names.
  */
 export async function blockApp(exePath: string, token: string, options: BlockAppOptions = {}): Promise<BlockedAppEntry> {
   verifyTokenForAction(token, 'block_app')
@@ -303,29 +288,8 @@ export async function blockApp(exePath: string, token: string, options: BlockApp
     throw new Error(`Not an executable path: "${exePath}".`)
   }
 
-  const baseDir = resolveBaseDir(options.baseDir)
-  const runner = options.runner ?? defaultCommandRunner
-  const exeName = basename(exePath)
-  const friendlyName = exeName.replace(/\.exe$/i, '')
-  const entry: BlockedAppEntry = { name: friendlyName, exePath, addedAt: new Date().toISOString() }
-
-  const entries = readBlockedApps(baseDir)
-  if (!entries.some((existing) => existing.exePath.toLowerCase() === exePath.toLowerCase())) {
-    writeBlockedApps(baseDir, [...entries, entry])
-  }
-
-  const key = ifeoKeyFor(exeName)
-  runner.run('reg', ['add', `"${key}"`, '/v', 'Debugger', '/t', 'REG_SZ', '/d', `"${IFEO_DEBUGGER}"`, '/f'])
-
-  const ruleName = firewallRuleName(friendlyName)
-  const firewallArgs = ['advfirewall', 'firewall', 'add', 'rule', `name="${ruleName}"`]
-  runner.run('netsh', [...firewallArgs, 'dir=in', `program="${exePath}"`, 'action=block', 'enable=yes'])
-  runner.run('netsh', [...firewallArgs, 'dir=out', `program="${exePath}"`, 'action=block', 'enable=yes'])
-
-  ensureWatcher(baseDir, options.scanner)
-  auditLog('block_app', true, { name: friendlyName, exePath })
-
-  return entry
+  void options
+  throw new Error('Application blocking is disabled. FocusLock only blocks websites.')
 }
 
 /**
@@ -355,6 +319,25 @@ export async function unblockApp(name: string, token: string, options: BlockAppO
     stopWatcher()
   }
   auditLog('unblock_app', true, { name: entry.name })
+}
+
+/**
+ * Removes artifacts created by the unsafe app-blocking implementation in
+ * older releases. It operates only on entries stored by FocusLock itself.
+ */
+export function clearLegacyAppBlocks(options: Pick<BlockAppOptions, 'baseDir' | 'runner'> = {}): void {
+  const baseDir = resolveBaseDir(options.baseDir)
+  const runner = options.runner ?? defaultCommandRunner
+  const entries = readBlockedApps(baseDir)
+
+  for (const entry of entries) {
+    const exeName = basename(entry.exePath)
+    runner.run('reg', ['delete', `"${ifeoKeyFor(exeName)}"`, '/f'])
+    runner.run('netsh', ['advfirewall', 'firewall', 'delete', 'rule', `name="${firewallRuleName(entry.name)}"`])
+  }
+
+  writeBlockedApps(baseDir, [])
+  stopWatcher()
 }
 
 // --- App discovery -----------------------------------------------------------------

@@ -70,8 +70,8 @@ export interface CategoryState {
 
 export type CategoryStateFile = Record<string, CategoryState>
 
-/** Presets enabled on a first run (safe, non-sensitive categories only). */
-export const DEFAULT_ENABLED_PRESETS: readonly string[] = ['ads', 'social']
+/** Presets enabled on a first run (porn is part of the app's core promise). */
+export const DEFAULT_ENABLED_PRESETS: readonly string[] = ['ads', 'social', 'porn']
 
 export function findPreset(id: string): CategoryPreset | undefined {
   return CATEGORY_PRESETS.find((preset) => preset.id === id)
@@ -169,13 +169,37 @@ async function appendListFile(filePath: string, domains: Set<string>): Promise<v
   }
 }
 
-/** Normalizes one source line to a bare lowercase domain, or '' if unusable. */
+/**
+ * Normalizes one source line to a bare lowercase domain (or a `*.suffix`
+ * wildcard that the matcher expands to cover subdomains), or '' when unusable.
+ * Handles plain-domain lists AND AdGuard/ABP host syntax (`||example.com^`,
+ * `||*.example.com^`, `||example.com/path^`), which the preset sources use.
+ */
 export function normalizeEntry(line: string): string {
   const trimmed = line.trim().toLowerCase().replace(/\.+$/, '')
-  if (trimmed === '' || trimmed.startsWith('#') || trimmed.includes(' ') || trimmed.includes('\t')) {
+  if (
+    trimmed === '' ||
+    trimmed.startsWith('#') ||
+    trimmed.startsWith('!') ||
+    trimmed.includes(' ') ||
+    trimmed.includes('\t')
+  ) {
     return ''
   }
-  return trimmed
+
+  // AdGuard exception rules (`@@||good.example^`) are NOT blocking entries.
+  if (trimmed.startsWith('@@')) {
+    return ''
+  }
+
+  // AdGuard host rule: `||` anchors the host; `^` terminates it (and any rule
+  // text after a `^` is a path/separator, not part of the hostname).
+  let host = trimmed.replace(/^\|\|/, '')
+  host = host.split('^')[0]!
+  host = host.replace(/^https?:\/\//, '')
+  // Keep only the hostname part: cut paths, ports and query strings.
+  host = host.split(/[/:#?]/)[0]!
+  return host
 }
 
 // --- Download ----------------------------------------------------------------

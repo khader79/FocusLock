@@ -139,6 +139,18 @@ describe('normalizeEntry', () => {
     expect(normalizeEntry('0.0.0.0 example.com')).toBe('')
     expect(normalizeEntry('example.com evil.org')).toBe('')
   })
+
+  it('parses AdGuard host rules into bare domains', () => {
+    expect(normalizeEntry('||pornhub.com^')).toBe('pornhub.com')
+    expect(normalizeEntry('||sub.example.com/path?q=1^')).toBe('sub.example.com')
+    expect(normalizeEntry('||example.com:8080^')).toBe('example.com')
+    expect(normalizeEntry('||*.wild.example^')).toBe('*.wild.example')
+  })
+
+  it('drops AdGuard comments and exception rules', () => {
+    expect(normalizeEntry('! this is a comment')).toBe('')
+    expect(normalizeEntry('@@||good.example^')).toBe('')
+  })
 })
 
 describe('downloadCategoryList', () => {
@@ -364,12 +376,12 @@ describe('bootstrapCategories', () => {
 
     await bootstrapCategories({ onRulesChanged })
 
-    // Only the default-enabled presets (ads, social) get downloaded.
-    expect(downloaded).toEqual(['ads', 'social'])
+    // Only the default-enabled presets (porn, ads, social) get downloaded.
+    expect(downloaded).toEqual(['porn', 'ads', 'social'])
     const state = await readCategoryState(dir)
     expect(state.ads?.enabled).toBe(true)
     expect(state.social?.enabled).toBe(true)
-    expect(state.porn?.enabled).toBe(false)
+    expect(state.porn?.enabled).toBe(true)
     expect(onRulesChanged).toHaveBeenCalledTimes(1)
     expect(await readEnabledPresetDomains(dir)).toEqual(['bootstrap-domain.com'])
   })

@@ -13,6 +13,7 @@ import {
 import { hardenApp } from './admin'
 import {
   appInfoFromExePath,
+  clearLegacyAppBlocks,
   listInstalledApps,
   pickApp,
   readBlockedApps,
@@ -35,7 +36,8 @@ import {
 } from './categories'
 import { bulkAdd, listSites, setCustomSitesBaseDir, setCustomSitesEffects } from './custom-sites'
 import {
-  configureSystemDnsOnInstall,
+  isSystemDnsPointingLocal,
+  probeLocalDnsServer,
   reloadDnsRules,
   restoreSystemDns,
   startDnsService,
@@ -67,6 +69,11 @@ import {
 } from './silent-mode'
 import { setupTray, type TrayController } from './tray'
 import { startWatchdog, stopWatchdog } from './watchdog'
+
+// Deterministic application name: drives the userData directory
+// (%APPDATA%\FocusLock) so the NSIS uninstaller can restore the DNS backup and
+// remove app data from a known location. Must run before app is ready.
+app.setName('FocusLock')
 
 let currentChallenge: Challenge | null = null
 let mainWindowRef: BrowserWindow | null = null
@@ -625,22 +632,59 @@ if (process.argv.includes('--enforcer')) {
       }
     })
 
-    app.whenReady().then(async () => {
+app.whenReady().then(async () => {
       hardenApp()
-      await installBlocker()
-      // Local DNS filter (127.0.0.1:53). On success, point the OS resolver at it
-      // ("install" step); requires admin privileges for both.
-      if (await startDnsService()) {
+
+      // DNS safety at startup. Probe 127.0.0.1:53 first: when a local DNS
+      // server is already answering (this app after a previous session, or the
+      // background enforcement service in silent mode), leave the OS resolver
+      // untouched. Only a resolver pointing at 127.0.0.1 with NO live server
+      // behind it is broken — that leftover state (from a crash/older build)
+      // is reverted to the backed-up servers before anything else runs.
+      let localDnsAlive = false
+      try {
+        localDnsAlive = await probeLocalDnsServer()
+      } catch (err) {
+        console.error('[dns] local DNS probe failed:', err)
+      }
+      if (!localDnsAlive) {
         try {
-          await configureSystemDnsOnInstall()
+          await restoreSystemDns()
         } catch (err) {
-          console.error('[dns] system DNS configuration failed (needs admin):', err)
+          console.error('[dns] could not restore legacy system DNS:', err)
         }
       }
+
+      await installBlocker()
+
+      // DNS filtering: bind 127.0.0.1:53 and, while blocking rules exist,
+      // point the OS resolver at it (backing up the original servers). The
+      // resolver is always restored before the server stops, and any crash is
+      // healed on the next launch — which is why the app auto-starts at login
+      // while DNS routing is active.
+      const dnsStarted = await startDnsService()
+      const routingLocal = dnsStarted ? await isSystemDnsPointingLocal() : false
+      if (routingLocal) {
+        app.setLoginItemSettings({ openAtLogin: true })
+      } else if (!localDnsAlive) {
+        // No local DNS server is (or could be) serving: make sure no stale
+        // 127.0.0.1 resolver remains. Defensive repeat of the restore above.
+        try {
+          await restoreSystemDns()
+        } catch (err) {
+          console.error('[dns] could not restore system DNS:', err)
+        }
+      }
+      // Website blocking also runs through the managed hosts-file section; the
+      // local DNS filter adds the large preset lists (porn, gambling, ...).
       startWatchdog()
       initProtectedActions()
 
       const userDataPath = app.getPath('userData')
+
+      // Remove registry/process-blocking artifacts written by old versions.
+      // Site blocking continues through the managed hosts-file section only.
+      clearLegacyAppBlocks({ baseDir: userDataPath })
 
       // Category presets: seed the default-enabled lists on first run (ads +
       // social) and refresh them every 24h. Each change rebuilds the matcher.
@@ -740,6 +784,9 @@ if (process.argv.includes('--enforcer')) {
           // Stop the watchdog so the intentional quit isn't resurrected by its
           // process "exit" / SIGTERM / SIGINT restart handlers.
           stopWatchdog()
+          // DNS routing was already restored by the quit executor; drop the
+          // login-item auto-start so a future login runs nothing.
+          app.setLoginItemSettings({ openAtLogin: false })
           // app.quit() closes all windows; the 'close' handler checks isQuitting
           // and now lets the window actually close instead of hiding to tray.
           app.quit()

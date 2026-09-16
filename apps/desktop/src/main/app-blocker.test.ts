@@ -10,6 +10,7 @@ import {
   blockApp,
   unblockApp,
   readBlockedApps,
+  writeBlockedApps,
   parseTasklistCsv,
   parseRegistryValueLines,
   parseInstalledExe,
@@ -216,45 +217,18 @@ describe('blockApp / unblockApp (challenge-gated mutations)', () => {
     await expect(blockApp('C:\\App.txt', signChallengeToken('block_app'))).rejects.toThrow(/Not an executable/)
   })
 
-  it('persists the entry, adds IFEO + firewall rules, and audits', async () => {
-    await blockApp('C:\\Steam\\steam.exe', signChallengeToken('block_app'), {
+  it('rejects application blocking to protect Windows services', async () => {
+    await expect(blockApp('C:\\Steam\\steam.exe', signChallengeToken('block_app'), {
       baseDir,
       runner: fakeWinRunner,
       scanner: fakeScanner,
-    })
-
-    const entries = readBlockedApps(baseDir)
-    expect(entries).toHaveLength(1)
-    expect(entries[0]).toMatchObject({ name: 'steam', exePath: 'C:\\Steam\\steam.exe' })
-
-    expect(runnerCalls.some(([prog, ...args]) => prog === 'reg' && args.some((a) => a.includes('Image File Execution Options\\steam.exe')))).toBe(true)
-    expect(runnerCalls.filter(([prog, ...args]) => prog === 'netsh' && args.includes('firewall') && args.includes('add'))).toHaveLength(2)
-
-    const audit = await readFile(join(baseDir, 'audit.log'), 'utf8')
-    expect(audit).toContain('"action":"block_app"')
-    expect(audit).toContain('"name":"steam"')
-  })
-
-  it('deduplicates when the same exe path is already blocked', async () => {
-    await blockApp('C:\\App.exe', signChallengeToken('block_app'), {
-      baseDir,
-      runner: fakeWinRunner,
-      scanner: fakeScanner,
-    })
-    await blockApp('C:\\App.exe', signChallengeToken('block_app'), {
-      baseDir,
-      runner: fakeWinRunner,
-      scanner: fakeScanner,
-    })
-    expect(readBlockedApps(baseDir)).toHaveLength(1)
+    })).rejects.toThrow(/only blocks websites/)
+    expect(readBlockedApps(baseDir)).toEqual([])
+    expect(runnerCalls).toEqual([])
   })
 
   it('removes an entry, deletes IFEO + firewall rules, and audits', async () => {
-    await blockApp('C:\\App.exe', signChallengeToken('block_app'), {
-      baseDir,
-      runner: fakeWinRunner,
-      scanner: fakeScanner,
-    })
+    writeBlockedApps(baseDir, [{ name: 'App', exePath: 'C:\\App.exe', addedAt: new Date().toISOString() }])
     await unblockApp('App', signChallengeToken('unblock_app'), { baseDir, runner: fakeWinRunner })
 
     expect(readBlockedApps(baseDir)).toEqual([])

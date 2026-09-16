@@ -39,7 +39,11 @@ describe('loadDnsRules', () => {
       ads: { enabled: false },
     })
     await mkdir(join(dir, 'category-lists'), { recursive: true })
-    await writeFile(join(dir, 'category-lists', 'social.txt'), 'from-social.example\nfrom-social.example\n', 'utf8')
+    await writeFile(
+      join(dir, 'category-lists', 'social.txt'),
+      'from-social.example\nfrom-social.example\n||*.wild-preset.example^\n',
+      'utf8',
+    )
     await writeJson(rulesPath, {
       enabled: true,
       exact: ['from-rules.example'],
@@ -67,7 +71,7 @@ describe('loadDnsRules', () => {
       ]),
     )
     expect(new Set(patterns.wildcards)).toEqual(
-      new Set(['*.wild-rules.example', '*.mydark.example']),
+      new Set(['*.wild-rules.example', '*.mydark.example', '*.wild-preset.example']),
     )
     expect(patterns.regexes).toEqual(['^ad\\d+\\.rules\\.example$'])
     expect(patterns.keywords).toEqual(['banner'])

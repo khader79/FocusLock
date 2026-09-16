@@ -81,9 +81,17 @@ export async function loadDnsRules(options: LoadDnsRulesOptions): Promise<RulePa
       }
     }
   }
+  // Wildcard entries may arrive from the rule file OR from preset lists that
+  // use `||*.example.com^` syntax, so the set must exist before filling it.
+  const wildcards = new Set(rulesFile.wildcards ?? [])
   for (const domain of presetDomains) {
     const normalized = normalizeDomain(domain)
-    if (normalized !== '') {
+    if (normalized === '') {
+      continue
+    }
+    if (normalized.startsWith('*.')) {
+      wildcards.add(normalized)
+    } else {
       exact.add(normalized)
     }
   }
@@ -96,7 +104,6 @@ export async function loadDnsRules(options: LoadDnsRulesOptions): Promise<RulePa
 
   // Custom sites: the bare + www domains become exact entries, the wildcard
   // variant becomes a wildcard rule (covers base + every subdomain).
-  const wildcards = new Set(rulesFile.wildcards ?? [])
   for (const site of customSites) {
     for (const variant of site.variants) {
       if (variant.startsWith('*.')) {
