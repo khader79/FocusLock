@@ -239,7 +239,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       state.deviceOwner
                           ? 'أنت مالك الجهاز (Device Owner) — حجب التطبيقات المباشر متاح.'
                           : 'سجّل مالك الجهاز عبر adb لتفعيل الحجب المباشر: '
-                              'adb shell dpm set-device-owner com.example.focuslock/.AdminReceiver',
+'adb shell dpm set-device-owner com.example.focuslock/.DeviceAdminBlocker',
                       style: const TextStyle(color: kMuted, fontSize: 13),
                     ),
                   ),
@@ -361,7 +361,7 @@ class _GuardCard extends StatelessWidget {
             if (!deviceOwner) ...<Widget>[
               const Text(
                 'المطلوب: صيّر التطبيق مالك الجهاز أولاً عبر adb:\n'
-                'adb shell dpm set-device-owner com.example.focuslock/.AdminReceiver',
+                'adb shell dpm set-device-owner com.example.focuslock/.DeviceAdminBlocker',
                 style: TextStyle(color: kError, fontSize: 13),
               ),
               const SizedBox(height: 12),

@@ -1,6 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Device-admin metadata for the FocusLock blocker receiver
+  (com.example.focuslock.DeviceAdminBlocker).
+
+  Declares the policies the receiver is prepared to use. These are what the
+  system shows the user in the "Activate this device administrator?" dialog and
+  gate which DevicePolicyManager calls may succeed:
+
+    reset-password  -> enforce a strong lock password / access camera policies
+    force-lock      -> lockNow() the device instantly when a session is armed
+    wipe-data       -> (with Device Owner) wipe the device on repeated failures
+                       or a factory-reset escalation
+    disable-camera  -> hard-disable the camera during a session
+
+  An un-rooted, non-owner install only ever exercises force-lock (see
+  GuardManager); the asset-owner upgrade `adb shell dpm set-device-owner`
+  unlocks the rest. Declaring them all up front is required before they can be
+  requested, and it pairs with the high-friction removal mechanism: what this
+  app protects cannot be silently taken away — deactivation demands a perfect
+  200-character typing challenge or a 2-hour mandatory wait.
+-->
 <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-policies>
+        <reset-password />
         <force-lock />
+        <wipe-data />
+        <disable-camera />
     </uses-policies>
 </device-admin>

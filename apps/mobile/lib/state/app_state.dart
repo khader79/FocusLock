@@ -18,6 +18,7 @@ class AppState extends ChangeNotifier {
   static const String _prefAnon = 'sync_anon';
   static const String _prefRow = 'sync_row';
   static const String _prefSecretKey = 'sync_secret';
+  static const String _prefPornOnlyMigration = 'porn_only_migration_v1';
 
   final SyncService _sync;
 
@@ -44,6 +45,9 @@ class AppState extends ChangeNotifier {
 
   String? _lastError;
   String? get lastError => _lastError;
+
+  HealthStatus? _health;
+  HealthStatus? get health => _health;
 
   List<FocusApp> installedApps = <FocusApp>[];
 
@@ -138,6 +142,7 @@ class AppState extends ChangeNotifier {
       _focus = results[0] as FocusState;
       _sites = (results[1] as List<String>);
       _categories = (results[2] as List<Category>);
+      await _applyPornOnlyMigrationIfLegacy();
       _blockedApps = (results[3] as List<String>);
     } catch (e) {
       _lastError = e.toString();
@@ -146,6 +151,53 @@ class AppState extends ChangeNotifier {
       _deviceOwner = await AppsBridge.isDeviceOwner();
     } catch (_) {
       _deviceOwner = false;
+    }
+    notifyListeners();
+  }
+
+  /// One-time migration: earlier builds shipped the focus/diversion categories
+  /// (social, video, X, TikTok, Facebook) ENABLED by default, silently blocking
+  /// normal sites in the tunnel. The user wants adult content blocked only, so
+  /// the first launch after this build turns those five built-ins off and
+  /// pushes the change to the native filter. Runs exactly once; afterwards the
+  /// user's own toggles are respected.
+  Future<void> _applyPornOnlyMigrationIfLegacy() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(_prefPornOnlyMigration) ?? false) {
+        return;
+      }
+      const focusIds = <String>{'social', 'video', 'x', 'tiktok', 'facebook'};
+      var changed = false;
+      final updated = _categories.map((c) {
+        if (focusIds.contains(c.id) && c.enabled) {
+          changed = true;
+          return Category(
+            id: c.id,
+            name: c.name,
+            pattern: c.pattern,
+            enabled: false,
+            custom: c.custom,
+          );
+        }
+        return c;
+      }).toList();
+      if (changed) {
+        _categories = updated;
+        await RulesBridge.setCategories(updated);
+      }
+      await prefs.setBool(_prefPornOnlyMigration, true);
+    } catch (_) {
+      // Non-blocking: a failed migration simply leaves the current state.
+    }
+  }
+
+  /// Refreshes only the cheap health snapshot (used by the dashboard timer).
+  Future<void> refreshHealth() async {
+    try {
+      _health = await HealthBridge.getHealth();
+    } catch (_) {
+      // Keep the last snapshot; the dashboard simply stays on the old values.
     }
     notifyListeners();
   }
@@ -167,6 +219,33 @@ class AppState extends ChangeNotifier {
   /// Native-generated challenge that gates pause/resume.
   Future<Challenge> beginToggle() async {
     return ProtectionBridge.generateChallenge();
+  }
+
+  /// Native-generated challenge that gates any other change (e.g. unblocking
+  /// an app). Reuses the same pending-challenge slot as [beginToggle].
+  Future<Challenge> beginChallenge() async {
+    return ProtectionBridge.generateChallenge();
+  }
+
+  /// Verifies [typed] against [challenge] without toggling the session.
+  Future<bool> verifyOnly(Challenge challenge, String typed) async {
+    final ok = await ProtectionBridge.verifyChallengeOnly(challenge.id, typed);
+    await refresh();
+    return ok;
+  }
+
+  /// Cold-Turkey-style unblock: [app] stays blocked until the long typing
+  /// challenge is completed. Returns true when it was verified and released.
+  Future<bool> unblockAppWithChallenge(
+    FocusApp app,
+    Challenge challenge,
+    String typed,
+  ) async {
+    final ok = await verifyOnly(challenge, typed);
+    if (ok) {
+      await resumeApp(app);
+    }
+    return ok;
   }
 
   /// Verifies the completed challenge and applies the toggle if accepted.

@@ -175,7 +175,7 @@ pnpm -F @focuslock/server dev        # tsx watch src/index.ts
 1. **صيّر التطبيق Device Owner** بعد التثبيت (يتطلب كابل USB ووضع مطوّر):
 
    ```bash
-   adb shell dpm set-device-owner com.example.focuslock/.AdminReceiver
+   adb shell dpm set-device-owner com.example.focuslock/.DeviceAdminBlocker
    ```
 
    - التطبيق يعلن `android:testOnly="true"` في `AndroidManifest.xml` حتى ينجح الأمر حتى لو وُجدت حسابات على الجهاز.
@@ -218,7 +218,7 @@ pnpm -F @focuslock/server dev        # tsx watch src/index.ts
 - **عبر الحاسوب** (يتطلب تصحيح أخطاء USB):
 
   ```bash
-  adb shell dpm remove-active-admin com.example.focuslock/.AdminReceiver
+  adb shell dpm remove-active-admin com.example.focuslock/.DeviceAdminBlocker
   adb uninstall com.example.focuslock
   ```
 

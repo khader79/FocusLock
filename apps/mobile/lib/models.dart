@@ -115,36 +115,38 @@ class Category {
 }
 
 /// The built-in category set shown on first launch.
+/// Focus/diversion categories ship OFF: the app blocks adult material only
+/// (native list). Social, video, X, TikTok and Facebook are user choices.
 const List<Category> builtInCategories = <Category>[
   Category(
     id: 'social',
     name: 'مواقع التواصل',
     pattern: 'instagram.com',
-    enabled: true,
+    enabled: false,
   ),
   Category(
     id: 'video',
     name: 'الفيديو',
     pattern: 'youtube.com',
-    enabled: true,
+    enabled: false,
   ),
   Category(
     id: 'x',
     name: 'إكس',
     pattern: 'x.com',
-    enabled: true,
+    enabled: false,
   ),
   Category(
     id: 'tiktok',
     name: 'تيك توك',
     pattern: 'tiktok.com',
-    enabled: true,
+    enabled: false,
   ),
   Category(
     id: 'facebook',
     name: 'فيسبوك',
     pattern: 'facebook.com',
-    enabled: true,
+    enabled: false,
   ),
   Category(
     id: 'shopping',
@@ -153,3 +155,64 @@ const List<Category> builtInCategories = <Category>[
     enabled: false,
   ),
 ];
+
+/// Live health snapshot of the protective layers, refreshed by the dashboard.
+/// Mirrors the native `focuslock/watchdog.status` map.
+class HealthStatus {
+  const HealthStatus({
+    required this.protected,
+    required this.primaryRunning,
+    required this.accessibilityEnabled,
+    required this.batteryExempt,
+    required this.canScheduleExactAlarms,
+    required this.vpnActive,
+    required this.notificationsEnabled,
+    required this.networkType,
+    required this.heartbeatAgeMs,
+  });
+
+  factory HealthStatus.fromMap(Map<dynamic, dynamic> map) {
+    return HealthStatus(
+      protected: map['protected'] as bool? ?? false,
+      primaryRunning: map['primaryRunning'] as bool? ?? false,
+      accessibilityEnabled: map['accessibilityEnabled'] as bool? ?? false,
+      batteryExempt: map['batteryExempt'] as bool? ?? false,
+      canScheduleExactAlarms: map['canScheduleExactAlarms'] as bool? ?? false,
+      vpnActive: map['vpnActive'] as bool? ?? false,
+      notificationsEnabled: map['notificationsEnabled'] as bool? ?? false,
+      networkType: map['networkType'] as String? ?? 'none',
+      heartbeatAgeMs: map['heartbeatAgeMs'] as int? ?? 0,
+    );
+  }
+
+  final bool protected;
+  final bool primaryRunning;
+  final bool accessibilityEnabled;
+  final bool batteryExempt;
+  final bool canScheduleExactAlarms;
+  final bool vpnActive;
+  final bool notificationsEnabled;
+
+  /// "wifi" | "mobile" | "other" | "none".
+  final String networkType;
+  final int heartbeatAgeMs;
+
+  /// Rough UI label for the active network transport.
+  String get networkLabel => switch (networkType) {
+        'wifi' => 'Wi-Fi',
+        'mobile' => 'شبكة خلوية',
+        'none' => 'لا اتصال',
+        _ => 'شبكة أخرى',
+      };
+
+  /// The accessibility guard counts as alive while its heartbeat is fresh.
+  bool get guardAlive =>
+      accessibilityEnabled && heartbeatAgeMs >= 0 && heartbeatAgeMs < 60_000;
+
+  bool get allHealthy =>
+      vpnActive &&
+      primaryRunning &&
+      guardAlive &&
+      notificationsEnabled &&
+      batteryExempt;
+}

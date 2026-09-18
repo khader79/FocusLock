@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">focuslock</string>
-    <string name="accessibility_service_description">Allows FocusLock to send blocked apps back to the home screen. Only used when an app is actively blocked.</string>
+    <string name="accessibility_service_description">Allows FocusLock to send blocked apps back to the home screen and to detect adult websites opened in browsers. Only acts on apps you blocked or on adult URLs.</string>
+    <string name="device_admin_disable_warning">If you remove this device administrator, you will be able to uninstall FocusLock. Your focus session and blocked-app protection depend on it. Think carefully.</string>
+    <string name="device_admin_prompt_explanation">Activate the device administrator so FocusLock can help protect you from uninstalling it during a weak moment.</string>
+
+    <string name="deactivation_challenge_title">Remove FocusLock protection?</string>
+    <string name="deactivation_challenge_instructions">Typing challenge — prove this is really what you want. Type the 200 characters below, exactly as shown, perfectly, with no errors. Any single mistake keeps the removal locked. There is no skip.</string>
+    <string name="deactivation_challenge_hint">Type the characters here…</string>
+    <string name="deactivation_challenge_progress">Typed characters</string>
+    <string name="deactivation_challenge_continue">Continue — unlocks only with a perfect match</string>
+    <string name="deactivation_challenge_continue_ready">Perfect match. Tap to allow deactivation.</string>
+    <string name="deactivation_challenge_wait">Wait 2 hours instead of unlocking now</string>
+    <string name="deactivation_cooldown_channel">Deactivation protection</string>
+    <string name="deactivation_cooldown_channel_desc">Persistent countdown notification shown while a deactivation attempt is being held</string>
+    <string name="deactivation_cooldown_title">Deactivation locked — %1$s remaining</string>
+    <string name="deactivation_cooldown_body">FocusLock protection stays on. A permanent wait is running because a deactivation or uninstall was attempted.</string>
 </resources>

@@ -25,8 +25,18 @@ import android.os.Build
 class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) {
-            return
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED -> onBoot(context)
+            Intent.ACTION_MY_PACKAGE_REPLACED -> onAppUpdate(context)
+        }
+    }
+
+    private fun onBoot(context: Context) {
+        // The time lock outlives reboots: restart its service first so the
+        // countdown keeps ticking even if the user never opens the app.
+        if (LockedDurationManager.isLocked(context)) {
+            LockedDurationManager.checkpoint(context)
+            AppLockService.start(context)
         }
 
         // Strict mode is permanent: restart the whole pipeline, re-assert
@@ -34,7 +44,6 @@ class BootReceiver : BroadcastReceiver() {
         // foreground service and the VPN back up.
         if (ProtectionStore.isGuard(context)) {
             GuardManager.enforce(context)
-            return
         }
 
         val serviceIntent = Intent(context, FocusVpnService::class.java)
@@ -52,5 +61,18 @@ class BootReceiver : BroadcastReceiver() {
         } catch (_: SecurityException) {
             // Not allowed to start the service in this state; ignore.
         }
+
+        // Re-arm the 15-minute pulse and repair the primary service if the
+        // app was updated (the process is fresh) or the device booted with an
+        // active protection session.
+        AntiKill.onAppReconciliation(context)
+
+        // Accessibility watchdog: the OEM may have slept the service off during
+        // the reboot; sync kicks it back in when protection is still owed.
+        AccessibilityHealthService.sync(context)
+    }
+
+    private fun onAppUpdate(context: Context) {
+        AntiKill.onAppReconciliation(context)
     }
 }

@@ -64,6 +64,17 @@ class ProtectionBridge {
     await _channel.invokeMethod<void>('rejectChallenge');
   }
 
+  /// Verifies [typed] against a pending challenge without touching the session
+  /// state (no pause toggle). Used to gate non-session changes like unblocking
+  /// an app. Returns true when the challenge was completed correctly.
+  static Future<bool> verifyChallengeOnly(String id, String typed) async {
+    final map = await _channel.invokeMapMethod<Object?, Object?>(
+      'verifyChallengeOnly',
+      <String, Object?>{'id': id, 'typed': typed},
+    );
+    return map?['ok'] as bool? ?? false;
+  }
+
   static Future<void> setDifficulty(int difficulty) async {
     await _channel.invokeMethod<void>(
       'setDifficulty',
@@ -192,5 +203,37 @@ class AppsBridge {
 
   static Future<void> resumeApp(String packageName) async {
     await _channel.invokeMethod<void>('resumeApp', <String, Object?>{'packageName': packageName});
+  }
+}
+
+/// Protection-health bridge ('focuslock/watchdog'). Feeds the live dashboard
+/// with the state of every protective layer (VPN, a11y guard, notifications,
+/// battery exemption, primary service) and opens the matching settings screen
+/// when a layer needs a manual fix.
+class HealthBridge {
+  HealthBridge._();
+
+  static const MethodChannel _channel = MethodChannel('focuslock/watchdog');
+
+  static Future<HealthStatus> getHealth() async {
+    final map = await _channel.invokeMapMethod<Object?, Object?>('status');
+    return HealthStatus.fromMap(map ?? const <Object?, Object?>{});
+  }
+
+  static Future<void> openAccessibilitySettings() async {
+    await _channel.invokeMethod<void>('openAccessibilitySettings');
+  }
+
+  static Future<void> openNotificationSettings() async {
+    await _channel.invokeMethod<void>('openNotificationSettings');
+  }
+
+  static Future<void> openBatterySettings() async {
+    await _channel.invokeMethod<void>('openBatterySettings');
+  }
+
+  /// Forces the watchdog to re-resolve / revive the primary protection service.
+  static Future<bool> revivePrimary() async {
+    return await _channel.invokeMethod<bool>('reviveNow') ?? false;
   }
 }

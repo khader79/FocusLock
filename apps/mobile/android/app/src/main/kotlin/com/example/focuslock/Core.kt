@@ -54,7 +54,7 @@ object Core {
 
     fun words(context: Context): List<String> {
         cachedWords?.let { return it }
-        val loaded = context.assets.open("challenge_words.txt").use { input ->
+        val loaded = context.assets.open("flutter_assets/assets/challenge_words.txt").use { input ->
             input.bufferedReader(Charsets.UTF_8).use { reader -> reader.readLines() }
         }.map { it.trim() }.filter { it.isNotEmpty() }
         cachedWords = loaded

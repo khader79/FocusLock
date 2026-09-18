@@ -7,6 +7,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../challenge.dart';
+import '../challenge_screen.dart';
 import '../services/protection_bridge.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
@@ -32,6 +34,51 @@ class _AppsScreenState extends State<AppsScreen> {
     setState(() => _loading = true);
     await context.read<AppState>().reloadInstalledApps();
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _block(FocusApp app) async {
+    final AppState store = context.read<AppState>();
+    final bool owner = store.deviceOwner;
+    await store.suspendApp(app);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(!owner
+            ? 'يُحجب عبر VPN أثناء الجلسة النشطة.'
+            : 'تم حجب التطبيق.'),
+      ));
+  }
+
+  /// Unblocking is gated by the long typing challenge: to reopen a blocked app
+  /// the user must first type the full challenge natively verified by the app.
+  Future<void> _unblock(FocusApp app) async {
+    final AppState store = context.read<AppState>();
+    final NavigatorState navigator = Navigator.of(context);
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+
+    final Challenge challenge = await store.beginChallenge();
+    if (!mounted || challenge.text.isEmpty) {
+      return;
+    }
+    await navigator.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ChallengeScreen(
+          challenge: challenge,
+          onFinished: (typed) async {
+            final ok = await store.unblockAppWithChallenge(app, challenge, typed);
+            navigator.pop();
+            messenger
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(
+                content: Text(ok
+                    ? 'انفتح التطبيق — أصبح مسموحاً.'
+                    : 'التحدي غير مكتمل — التطبيق ما يزال محجوباً.'),
+              ));
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -113,24 +160,8 @@ class _AppsScreenState extends State<AppsScreen> {
                                     ),
                                     Switch(
                                       value: blocked,
-                                      onChanged: (value) async {
-                                        final AppState store = context.read<AppState>();
-                                        final ScaffoldMessengerState messenger =
-                                            ScaffoldMessenger.of(context);
-                                        if (value) {
-                                          final bool owner = store.deviceOwner;
-                                          await store.suspendApp(app);
-                                          messenger
-                                            ..hideCurrentSnackBar()
-                                            ..showSnackBar(SnackBar(
-                                              content: Text(!owner
-                                                  ? 'يُحجب عبر VPN أثناء الجلسة النشطة.'
-                                                  : 'تم حجب التطبيق.'),
-                                            ));
-                                        } else {
-                                          await store.resumeApp(app);
-                                        }
-                                      },
+                                      onChanged: (value) =>
+                                          value ? _block(app) : _unblock(app),
                                     ),
                                   ],
                                 ),

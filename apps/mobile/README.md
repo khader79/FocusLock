@@ -25,7 +25,7 @@ android/app/src/main/kotlin/com/example/focuslock/   Kotlin native layer
   FocusLockService.kt      foreground service + persistent notification
   FocusVpnService.kt       DNS-filtering VPN with pause passthrough
   Blocklist.kt / RuleStore.kt  asset + custom sites/categories merge
-  AppBlocker.kt / AdminReceiver.kt / BootReceiver.kt / FocusAccessibilityService.kt
+  AppBlocker.kt / DeviceAdminBlocker.kt / BootReceiver.kt / SafeBlockerAccessibilityService.kt
   SyncClient.kt            Kotlin mirror of the encrypted Supabase sync
   MainActivity.kt          MethodChannel host (protection, launch, rules, apps, sync)
 ```
@@ -60,7 +60,7 @@ flutter run            # debug on the first attached device
    blocking):
 
    ```bash
-   adb shell dpm set-device-owner com.example.focuslock/.AdminReceiver
+   adb shell dpm set-device-owner com.example.focuslock/.DeviceAdminBlocker
    ```
 
    The app is built with `android:testOnly="true"` for this provisioning flow;

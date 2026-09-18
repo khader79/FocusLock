@@ -20,8 +20,8 @@ import android.os.Build
  *     instead of "filter by UID" the service restricts the tunnel to exactly
  *     the blocked packages via `addAllowedApplication(...)` and drops their
  *     traffic while every other app bypasses the tunnel untouched.
- *  3. Accessibility — [FocusAccessibilityService] watches window-state changes
- *     and fires GLOBAL_ACTION_HOME whenever a blocked app comes to the
+ *  3. Accessibility — [SafeBlockerAccessibilityService] watches window-state
+ *     changes and fires GLOBAL_ACTION_HOME whenever a blocked app comes to the
  *     foreground. Works without any privileged setup.
  *
  * Every block lives in a SharedPreferences set (`blocked_packages`), which all
@@ -32,7 +32,7 @@ import android.os.Build
  *   1. Build & install the (testOnly) app on the device.
  *   2. From the host terminal run:
  *
- *        adb shell dpm set-device-owner com.example.focuslock/.AdminReceiver
+ *        adb shell dpm set-device-owner com.example.focuslock/.DeviceAdminBlocker
  *
  *   3. Re-launch the app: isDeviceOwner() now returns true and suspendApp()
  *      performs a real OS-level suspension.
@@ -41,14 +41,14 @@ import android.os.Build
  *    - "has existing accounts" -> use the testOnly build (already declared) or
  *      reset the device before provisioning.
  *    - "already set" -> adb shell dpm remove-active-admin
- *      com.example.focuslock/.AdminReceiver, or factory-reset the device.
+ *      com.example.focuslock/.DeviceAdminBlocker, or factory-reset the device.
  *    - Only ONE Device Owner can exist per device.
  *
  * --- Accessibility fallback setup -------------------------------------------
  *
  *   Settings -> Accessibility -> FocusLock app blocking -> enable.
  *   (Or: adb shell settings put secure enabled_accessibility_services
- *        com.example.focuslock/com.example.focuslock.FocusAccessibilityService)
+ *        com.example.focuslock/com.example.focuslock.SafeBlockerAccessibilityService)
  *
  * --- VPN fallback setup -------------------------------------------------------
  *
@@ -57,7 +57,7 @@ import android.os.Build
  */
 object AppBlocker {
 
-    private const val PREFS = "focuslock_app_blocker"
+    const val PREFS_NAME = "focuslock_app_blocker"
     private const val KEY_BLOCKED = "blocked_packages"
 
     /** How a block is currently being enforced. */
@@ -76,7 +76,7 @@ object AppBlocker {
     )
 
     private fun prefs(context: Context): android.content.SharedPreferences {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     private fun policyManager(context: Context): DevicePolicyManager {
@@ -84,7 +84,7 @@ object AppBlocker {
     }
 
     private fun adminComponent(context: Context): ComponentName {
-        return ComponentName(context, AdminReceiver::class.java)
+        return ComponentName(context, DeviceAdminBlocker::class.java)
     }
 
     /** Whether this app is the current Device Owner. */

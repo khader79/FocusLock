@@ -11,7 +11,7 @@ import android.os.Build
  * Arms the sticky "strict mode" (الوضع الصارم).
  *
  * Once armed it can only be lifted with a factory reset or
- *   adb shell dpm remove-active-admin com.example.focuslock/.AdminReceiver
+ *   adb shell dpm remove-active-admin com.example.focuslock/.DeviceAdminBlocker
  * so it must NEVER offer a local "disable" path. [enable] persists the flag
  * and immediately applies every Device Owner hardening below:
  *
@@ -41,11 +41,18 @@ object GuardManager {
     fun enforce(context: Context, startProtection: Boolean = true): Map<String, Boolean> {
         val guard = ProtectionStore.isGuard(context)
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        val admin = ComponentName(context, AdminReceiver::class.java)
+        val admin = ComponentName(context, DeviceAdminBlocker::class.java)
         val isOwner = dpm.isDeviceOwnerApp(context.packageName)
 
         var uninstallBlocked = false
         var lockdownVpn = false
+
+        if (guard) {
+            // Uninstall high-friction watchdog: if the admin was revoked, put
+            // it straight back so the app cannot be silently uninstalled. This
+            // also heals a revoke that happened while the process was stopped.
+            DeviceAdminBlocker.rearm(context)
+        }
 
         if (guard && isOwner) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -77,6 +84,10 @@ object GuardManager {
         if (startProtection && guard) {
             startProtection(context)
         }
+
+        // Accessibility watchdog tracks the guard too: while strict mode is on,
+        // the a11y guard must never silently drop (Samsung/Xiaomi battery sleep).
+        AccessibilityHealthService.sync(context)
 
         return mapOf(
             "guard" to guard,

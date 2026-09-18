@@ -21,6 +21,14 @@ import android.os.IBinder
  *    verified pause flips `ProtectionStore.isPaused`, at which point the tunnel
  *    passes blocked domains through again.
  *
+ * **Anti-kill contract.** [onTaskRemoved] / [onDestroy] arm an exact alarm
+ * (`setExactAndAllowWhileIdle` + `PendingIntent.getForegroundService`) through
+ * [AntiKill.scheduleRestart], which resurrects the service ~1s after a
+ * recents-swipe or an OS kill without relying on `START_STICKY`. A 15-minute
+ * [WatchdogJobService] pulse verifies this service is alive and force-launches
+ * it otherwise, and the user is prompted to whitelist FocusLock from battery
+ * optimizations so every component of the ladder stays exact and Doze-safe.
+ *
  * Constants replicate the launch-action contract used by [MainActivity].
  */
 class FocusLockService : Service() {
@@ -33,6 +41,10 @@ class FocusLockService : Service() {
         const val ACTION_REFRESH = "com.example.focuslock.action.FOCUS_REFRESH"
         const val ACTION_SET_PAUSE = "com.example.focuslock.action.FOCUS_SET_PAUSE"
         const val EXTRA_PAUSED = "focuslock:paused"
+
+        // Delivered by the AntiKill resurrection alarm (setExactAndAllowWhileIdle
+        // + PendingIntent.getForegroundService) right after a swipe or an OS kill.
+        const val ACTION_REVIVE = "com.example.focuslock.action.FOCUS_REVIVE"
 
         const val EXTRA_LAUNCH_ACTION = "focuslock:action"
         const val LAUNCH_PAUSE = "pause"
@@ -47,6 +59,11 @@ class FocusLockService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        // We are (re)creating: any pending resurrection alarm is obsolete.
+        AntiKill.cancelRestart(this)
+        AntiKill.touchHeartbeat(this)
+        // Re-arm the 15-minute pulse, idempotent under JobScheduler.
+        AntiKill.schedulePulse(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -57,11 +74,14 @@ class FocusLockService : Service() {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         startForeground(NOTIFICATION_ID, buildNotification())
                     }
+                    AntiKill.cancelRestart(this)
                     return START_STICKY
                 }
                 ProtectionStore.setActive(this, false)
                 stopVpn()
                 stopForeground(STOP_FOREGROUND_REMOVE)
+                AntiKill.cancelRestart(this)
+                AccessibilityHealthService.sync(this)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -70,6 +90,9 @@ class FocusLockService : Service() {
                 // Pause/resume flipped somewhere else (e.g. the challenge UI);
                 // re-render the notification so its action mirrors state.
                 refreshNotification()
+                // A refresh means the protection intent flips too; keep the
+                // accessibility watchdog in step.
+                AccessibilityHealthService.sync(this)
             }
 
             ACTION_SET_PAUSE -> {
@@ -77,6 +100,7 @@ class FocusLockService : Service() {
                 if (ProtectionStore.isGuard(this)) {
                     ProtectionStore.setPaused(this, false)
                     refreshNotification()
+                    AntiKill.cancelRestart(this)
                     return START_STICKY
                 }
                 val paused = intent.getBooleanExtra(EXTRA_PAUSED, true)
@@ -87,6 +111,8 @@ class FocusLockService : Service() {
                 refreshNotification()
             }
 
+            // ACTION_REVIVE (from the resurrection alarm), ACTION_START and any
+            // other action simply promote the service and bring blocking back.
             else -> {
                 ProtectionStore.setActive(this, true)
                 startAsForeground()
@@ -96,16 +122,37 @@ class FocusLockService : Service() {
                     // failed/revoked lockdown re-arms itself.
                     GuardManager.enforce(this, startProtection = false)
                 }
+                AccessibilityHealthService.sync(this)
             }
         }
+
+        // Alive again — a successful (re)start invalidates the resurrection
+        // alarm, stamps the heartbeat and keeps the periodic pulse armed.
+        AntiKill.cancelRestart(this)
+        AntiKill.touchHeartbeat(this)
+        AntiKill.schedulePulse(this)
         return START_STICKY
     }
 
+    /**
+     * Swiping the app away from Recent Apps kills the process; `START_STICKY`
+     * only *asks* the system to recreate us (it often does not on modern
+     * Android). The definitive path is an exact alarm owned by system_server:
+     * it fires ~1s later and its PendingIntent.getForegroundService operation is
+     * an allowed background FGS start, so the session snaps straight back up.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        if (AntiKill.shouldProtect(this)) {
+            AntiKill.scheduleRestart(this, AntiKill.RESTART_DELAY_MS)
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
-        if (ProtectionStore.isActive(this) || ProtectionStore.isGuard(this)) {
-            // START_STICKY was used, so the system may restart us; keep the
-            // session active unless an explicit ACTION_STOP was issued.
-            startAsForeground()
+        if (AntiKill.shouldProtect(this)) {
+            // START_STICKY may recreate us, but the exact alarm is the
+            // deterministic path; always re-arm it on teardown too.
+            AntiKill.scheduleRestart(this, AntiKill.RESTART_DELAY_MS)
         }
         super.onDestroy()
     }

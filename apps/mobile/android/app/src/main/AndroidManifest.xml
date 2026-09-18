@@ -4,7 +4,23 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Anti-kill stack permissions. -->
+    <!-- Lets FocusLock ask the user once to be whitelisted from Doze/battery
+         optimization, which keeps the resurrection alarm exact and Doze-safe. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- Exact alarms (SCHEDULE_EXACT_ALARM is denied by default on Android 13+
+         fresh installs; check AlarmManager.canScheduleExactAlarms() at runtime
+         and degrade to the inexact allow-while-idle path when refused). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!-- Auto-granted exact-alarm access on Android 14+ without the user-facing
+         "Alarms & reminders" toggle. NOTE: Play policy limits USE_EXACT_ALARM to
+         alarm/clock apps; this app is distributed side-loaded / via Device Owner
+         provisioning, so the stricter guarantee is worth it. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
 
     <permission
         android:name="com.example.focuslock.permission.VPN"
@@ -47,7 +63,8 @@
             android:name="com.example.focuslock.FocusVpnService"
             android:exported="false"
             android:permission="android.permission.BIND_VPN_SERVICE"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
@@ -59,14 +76,48 @@
         <service
             android:name="com.example.focuslock.FocusLockService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="focus_session_protection" />
         </service>
 
+        <service
+            android:name="com.example.focuslock.AppLockService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="time_lock_enforcement" />
+        </service>
+
+        <!-- 15-minute anti-kill pulse (JobScheduler kept it alive at the
+             platform floor even when the process is dead/backgrounded). -->
+        <service
+            android:name="com.example.focuslock.WatchdogJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <receiver
-            android:name="com.example.focuslock.AdminReceiver"
+            android:name="com.example.focuslock.TimeLockReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.focuslock.action.TIMELOCK_ALARM" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.example.focuslock.HealthTickReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.focuslock.action.A11Y_HEALTH_TICK" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.example.focuslock.DeviceAdminBlocker"
             android:exported="true"
             android:permission="android.permission.BIND_DEVICE_ADMIN">
             <meta-data
@@ -77,16 +128,63 @@
             </intent-filter>
         </receiver>
 
+        <!-- High-friction deactivation gate: full-screen 200-char typing
+             challenge launched over Settings whenever a deactivation or
+             uninstall is attempted. Own empty task, no recents entry. -->
+        <activity
+            android:name="com.example.focuslock.DeactivationChallengeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/NormalTheme"
+            android:turnScreenOn="true" />
+
+        <!-- 2-hour mandatory wait after a successful (but re-armed) revoke:
+             persistent countdown notification + admin watchdog. -->
+        <service
+            android:name="com.example.focuslock.DeactivationCooldownService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="deactivation_protection_cooldown" />
+        </service>
+
+        <receiver
+            android:name="com.example.focuslock.RestartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <!-- Inexact-alarm fallback when exact alarms are not granted. -->
+                <action android:name="com.example.focuslock.action.WATCHDOG_RESTART" />
+                <!-- Foreground system broadcast: user granted/revoked
+                     SCHEDULE_EXACT_ALARM; receiving it allows a background
+                     foreground-service start, so re-arm + revive. -->
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name="com.example.focuslock.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
         <service
-            android:name="com.example.focuslock.FocusAccessibilityService"
+            android:name="com.example.focuslock.AccessibilityHealthService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="accessibility_watchdog_enforcement" />
+        </service>
+
+        <service
+            android:name="com.example.focuslock.SafeBlockerAccessibilityService"
             android:exported="false"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

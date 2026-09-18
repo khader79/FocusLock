@@ -26,6 +26,13 @@ object DnsPacket {
         return ((packet[offset].toInt() and 0xFF) shl 8) or (packet[offset + 1].toInt() and 0xFF)
     }
 
+    fun getU32(packet: ByteArray, offset: Int): Long {
+        return ((packet[offset].toLong() and 0xFF) shl 24) or
+            ((packet[offset + 1].toLong() and 0xFF) shl 16) or
+            ((packet[offset + 2].toLong() and 0xFF) shl 8) or
+            (packet[offset + 3].toLong() and 0xFF)
+    }
+
     /** Reads the 12-byte DNS header, if the packet is large enough. */
     fun parseHeader(packet: ByteArray): Header? {
         if (packet.size < HEADER_LENGTH) {
@@ -131,6 +138,37 @@ object DnsPacket {
     }
 
     /**
+     * Returns the offset just past the (possibly pointer-compressed) name at
+     * [startOffset], following the framing fields of an RR/TTL walk without
+     * decoding labels.
+     */
+    fun skipName(packet: ByteArray, startOffset: Int): Int? {
+        var offset = startOffset
+        var jumps = 0
+        while (offset < packet.size) {
+            val length = packet[offset].toInt() and 0xFF
+            if (length == 0) {
+                return offset + 1
+            }
+            if (length and 0xC0 == 0xC0) {
+                if (offset + 1 >= packet.size) {
+                    return null
+                }
+                if (++jumps > 64) {
+                    return null
+                }
+                offset += 2
+            } else {
+                if (offset + 1 + length > packet.size) {
+                    return null
+                }
+                offset += 1 + length
+            }
+        }
+        return null
+    }
+
+    /**
      * Builds a minimal NXDOMAIN response for [query]: the same transaction ID,
      * QR|RA|RCODE=3, QDCOUNT=1, and the original question echoed back. Any
      * additional section (for example an EDNS OPT record) is dropped.
@@ -154,4 +192,63 @@ object DnsPacket {
         )
         return response
     }
+
+    /**
+     * Validates [reply] as a positive answer suitable for short-term caching and
+     * derives its minimum answer TTL. Returns null when there is no reliable TTL
+     * (empty answers, SERVFAIL, TTL 0).
+     */
+    fun parseCacheable(reply: ByteArray): DnsCacheEntry? {
+        val header = parseHeader(reply) ?: return null
+        if (header.flags and FLAG_QR == 0) {
+            return null
+        }
+        val question = parseQuestion(reply) ?: return null
+        val answerCount = getU16(reply, 6)
+        if (answerCount == 0) {
+            return null
+        }
+
+        var offset = question.endOffset
+        var minTtl = Long.MAX_VALUE
+        var scanned = 0
+        while (scanned < answerCount && scanned < 32) {
+            val nameEnd = skipName(reply, offset) ?: return null
+            if (nameEnd + 10 > reply.size) {
+                return null
+            }
+            val ttl = getU32(reply, nameEnd + 4)
+            if (ttl <= 0) {
+                return null
+            }
+            minTtl = minOf(minTtl, ttl)
+            val rdLength = getU16(reply, nameEnd + 8)
+            if (nameEnd + 10 + rdLength > reply.size) {
+                return null
+            }
+            offset = nameEnd + 10 + rdLength
+            scanned++
+        }
+
+        val ttlMillis = (minTtl * 1000).coerceIn(30_000L, 3_600_000L)
+        return DnsCacheEntry(
+            name = question.name,
+            type = question.type,
+            klass = question.klass,
+            reply = reply,
+            expiresAt = System.currentTimeMillis() + ttlMillis,
+        )
+    }
+}
+
+/** Cached positive DNS answer for one (name, type, class) triple. */
+class DnsCacheEntry(
+    val name: String,
+    val type: Int,
+    val klass: Int,
+    val reply: ByteArray,
+    val expiresAt: Long,
+) {
+    val key: String
+        get() = "$name|$type|$klass"
 }
