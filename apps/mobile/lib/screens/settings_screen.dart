@@ -11,7 +11,10 @@ import '../state/app_state.dart';
 import '../theme.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.onBack});
+
+  /// يعيد المستخدم إلى الصفحة الرئيسية عند الضغط على زر الإلغاء.
+  final VoidCallback? onBack;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -139,7 +142,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final AppState state = context.watch<AppState>();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('الإعدادات')),
+      appBar: AppBar(
+        title: const Text('الإعدادات'),
+        leading: widget.onBack != null
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: widget.onBack,
+                tooltip: 'الرجوع للرئيسية',
+              )
+            : null,
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[

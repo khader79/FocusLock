@@ -35,7 +35,8 @@ class ContentBlockerService : AccessibilityService() {
     private var lastBlockLoadMs = 0L
     private var lastAppKickMs = 0L
     private var watcher: android.os.Handler? = null
-    private var lastDnsKickMs = 0L
+    private var lastUninstallKickMs = 0L
+    private var lastPageKickMs = 0L
 
     /**
      * Apps that must never come to the foreground. Only X is blocked by
@@ -93,39 +94,6 @@ class ContentBlockerService : AccessibilityService() {
     }
 
     /**
-     * Keeps the Private DNS provider locked to the family resolver.
-     *
-     * The check is deliberately narrow: it looks for the actual DNS settings
-     * controls (the hostname field and the mode radio group) rather than
-     * scanning screen text for the word "DNS". An earlier version matched any
-     * Settings screen mentioning USB or a hostname, which made the whole
-     * settings app unusable — that failure is what this shape prevents.
-     *
-     * Other Settings pages, including the rest of Network, are left alone.
-     */
-    private fun guardPrivateDns(event: AccessibilityEvent): Boolean {
-        val pkg = event.packageName?.toString()?.lowercase() ?: return false
-        val isSettings = pkg == "com.android.settings" || pkg == "com.samsung.android.settings"
-        if (!isSettings) return false
-        if (!dnsProtectionOn()) return false
-
-        val source = event.source ?: return false
-        try {
-            if (!touchesDnsControls(source) && !isDnsEntryRow(source)) return false
-            val now = SystemClock.uptimeMillis()
-            performGlobalAction(GLOBAL_ACTION_HOME)
-            if (now - lastDnsKickMs > 2500) {
-                lastDnsKickMs = now
-                BlockedLog.add(this, "DNS", "private_dns_settings", pkg)
-                Toast.makeText(this, R.string.dns_protected, Toast.LENGTH_SHORT).show()
-            }
-            return true
-        } finally {
-            runCatching { source.recycle() }
-        }
-    }
-
-    /**
      * True only when the interacted node belongs to the Private DNS screen —
      * identified by its own resource ids, so a same-named string somewhere else
      * cannot trigger it.
@@ -167,12 +135,175 @@ class ContentBlockerService : AccessibilityService() {
         getSharedPreferences("focuslock_prefs", MODE_PRIVATE)
             .getBoolean("dns_protection", true)
 
+    /**
+     * Runs on the same slow poll that watches blocked apps, so it cannot be
+     * raced by event timing.
+     *
+     * Blocks two things: the Private DNS page, and any Settings screen showing
+     * FocusLock's own details page — App info, reached directly, through the
+     * app list, or through the launcher's long-press shortcut.
+     *
+     * Everything else — the app list itself, other apps' detail pages, Wi-Fi,
+     * Developer options — is left alone.
+     */
+    /**
+     * Settings is checked through `rootInActiveWindow`, which is the only
+     * handle that reliably carries the app-details tree. The launcher menu is
+     * a separate window, so it is checked on its own.
+     */
+    private fun checkProtectedPages() {
+        if (scanning) return
+
+        val active = runCatching { rootInActiveWindow }.getOrNull()
+        if (active != null) {
+            try {
+                val pkg = runCatching { active.packageName?.toString()?.lowercase() }
+                    .getOrNull().orEmpty()
+                if (pkg == "com.android.settings" || pkg == "com.samsung.android.settings") {
+                    if (dnsProtectionOn() &&
+                        (touchesDnsControls(active) || isDnsEntryRow(active))
+                    ) {
+                        kick("DNS")
+                        return
+                    }
+                    if (showsFocusLockDetails(active)) {
+                        kick("APPINFO")
+                        return
+                    }
+                }
+            } finally {
+                runCatching { active.recycle() }
+            }
+        }
+
+        checkLauncherMenu()
+        checkUninstallDialog()
+    }
+
+    /**
+     * The confirmation sheet that appears after Uninstall is tapped is a
+     * separate window owned by the package installer. Catching it here closes
+     * the door at the last possible moment — before the OK button can act.
+     *
+     * Scoped to this app by package name, so nothing else is ever affected.
+     */
+    private fun checkUninstallDialog() {
+        val active = runCatching { rootInActiveWindow }.getOrNull() ?: return
+        try {
+            val pkg = runCatching { active.packageName?.toString()?.lowercase() }
+                .getOrNull().orEmpty()
+            if (!pkg.contains("packageinstaller") && !pkg.contains("com.android.packageinstaller")) {
+                return
+            }
+            val sb = StringBuilder()
+            collectScreenText(active, sb, 0)
+            val screen = sb.toString().lowercase()
+            val isUninstallPrompt = screen.contains("uninstall") || screen.contains("إلغاء تثبيت")
+            if (!isUninstallPrompt) return
+            if (!screen.contains("focuslock") && !screen.contains("com.focuslock.accessibility")) {
+                return
+            }
+            kick("UNINSTALL_PROMPT")
+        } finally {
+            runCatching { active.recycle() }
+        }
+    }
+
+    /**
+     * The long-press menu lives in its own window, so it is not reachable via
+     * rootInActiveWindow. Only launcher windows are inspected, and only the
+     * ones currently on screen, which keeps this cheap enough to run often.
+     */
+    private fun checkLauncherMenu() {
+        val list = runCatching { windows }.getOrNull() ?: return
+        try {
+            for (i in 0 until list.size) {
+                val w = runCatching { list.get(i) }.getOrNull() ?: continue
+                try {
+                    val root = runCatching { w.root }.getOrNull() ?: continue
+                    try {
+                        val pkg = runCatching { root.packageName?.toString()?.lowercase() }
+                            .getOrNull().orEmpty()
+                        if (!pkg.contains("launcher") && !pkg.contains("quickstep")) continue
+                        if (launcherShowsFocusLock(root)) {
+                            kick("APP_MENU")
+                            return
+                        }
+                    } finally {
+                        runCatching { root.recycle() }
+                    }
+                } finally {
+                    runCatching { w.recycle() }
+                }
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
+     * True when a launcher surface is showing the FocusLock icon's own menu.
+     *
+     * Requires the label plus a shortcut action. The plain home screen and the
+     * app drawer show the label but never the actions together, so they are
+     * never caught.
+     */
+    private fun launcherShowsFocusLock(root: AccessibilityNodeInfo): Boolean {
+        val sb = StringBuilder()
+        collectScreenText(root, sb, 0)
+        val screen = sb.toString().lowercase()
+        if (!screen.contains("focuslock")) return false
+        return screen.contains("app info") || screen.contains("إعدادات التطبيق") ||
+                screen.contains("uninstall") || screen.contains("إزالة") ||
+                screen.contains("remove") || screen.contains("حذف") ||
+                screen.contains("widgets") || screen.contains("أدوات") ||
+                screen.contains("app details")
+    }
+
+    private fun kick(reason: String) {
+        val now = SystemClock.uptimeMillis()
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        if (now - lastPageKickMs > 2500) {
+            lastPageKickMs = now
+            BlockedLog.add(this, reason, "protected_page", "settings")
+            Toast.makeText(this, "Protected by FocusLock", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * True when the screen is FocusLock's own details page.
+     *
+     * The package name is not exposed in this screen's node tree, so the label
+     * is the anchor. To avoid catching the app list — which shows the same
+     * label — the screen must also contain a details-page-only marker such as
+     * the storage figure or the version line, neither of which ever appears in
+     * a list row.
+     *
+     * No other app's page is ever matched: it must say "FocusLock".
+     */
+    private fun showsFocusLockDetails(root: AccessibilityNodeInfo): Boolean {
+        val sb = StringBuilder()
+        collectScreenText(root, sb, 0)
+        val screen = sb.toString().lowercase()
+        if (!screen.contains("focuslock")) return false
+        return APP_PAGE_WORDS.any { screen.contains(it) }
+    }
+
+    private fun collectScreenText(node: AccessibilityNodeInfo, sb: StringBuilder, depth: Int) {
+        if (depth > 25 || sb.length > 8000) return
+        node.text?.let { sb.append(it).append(' ') }
+        node.contentDescription?.let { sb.append(it).append(' ') }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            collectScreenText(child, sb, depth + 1)
+            child.recycle()
+        }
+    }
+
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val e = event ?: return
         val pkg = e.packageName?.toString()?.lowercase() ?: return
         if (pkg == packageName.lowercase()) return
-
-        if (guardPrivateDns(e)) return
 
         if (pkg in blockedApps) {
             val now = SystemClock.uptimeMillis()
@@ -312,10 +443,16 @@ class ContentBlockerService : AccessibilityService() {
         if (scanning) return
         val root = runCatching { rootInActiveWindow }.getOrNull() ?: return
         val pkg = runCatching { root.packageName?.toString()?.lowercase() }.getOrNull()
+        if (pkg.isNullOrBlank() || pkg == packageName.lowercase()) {
+            runCatching { root.recycle() }
+            checkProtectedPages()
+            return
+        }
         runCatching { root.recycle() }
-        if (pkg.isNullOrBlank() || pkg == packageName.lowercase()) return
-        if (pkg !in blockedApps) return
 
+        checkProtectedPages()
+
+        if (pkg !in blockedApps) return
         val now = SystemClock.uptimeMillis()
         performGlobalAction(GLOBAL_ACTION_HOME)
         if (now - lastAppKickMs > 2000) {
@@ -333,7 +470,7 @@ class ContentBlockerService : AccessibilityService() {
         private const val TYPING_WINDOW_MS = 6_000L
         private const val SCAN_COOLDOWN_MS = 500L
         private const val BLOCK_RELOAD_MS = 4_000L
-        private const val WATCH_INTERVAL_MS = 700L
+        private const val WATCH_INTERVAL_MS = 150L
 
         /**
          * Resource-id fragments that exist only on the Private DNS screen.
@@ -352,6 +489,20 @@ class ContentBlockerService : AccessibilityService() {
             "private_dns_base_summary",
             "opportunistic",
             "dns_autofill"
+        )
+
+        /**
+         * Words that mark a screen as an app-management page. Paired with the
+         * FocusLock label so the plain app list, which shows the label but none
+         * of these, stays usable.
+         */
+        private val APP_PAGE_WORDS = listOf(
+            "app info", "إعدادات التطبيق", "manage apps", "إدارة التطبيقات",
+            "force stop", "إيقاف إجباري", "uninstall", "إلغاء التثبيت",
+            "app details", "تفاصيل التطبيق", "clear data", "مسح البيانات",
+            "storage", "التخزين", "permissions", "الأذونات",
+            "version 1.0.0", "internal storage", "التخزين الداخلي",
+            "screen time", "وقت الشاشة", "battery", "البطارية"
         )
     }
 }

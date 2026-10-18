@@ -31,7 +31,7 @@ class _HomeShellState extends State<HomeShell> {
       1 => const WebsitesScreen(),
       2 => const AppsScreen(),
       3 => const CategoriesScreen(),
-      4 => const SettingsScreen(),
+      4 => SettingsScreen(onBack: () => setState(() => _index = 0)),
       _ => const SizedBox.shrink(),
     };
   }
