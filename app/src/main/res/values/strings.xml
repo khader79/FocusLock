@@ -1,0 +1,217 @@
+<resources>
+    <string name="app_name">FocusLock</string>
+    <string name="accessibility_service_description">
+        Blocks adult searches and explicit content across all apps and browsers (including Incognito).
+        Blocks any apps you choose completely, and guards searches inside the rest.
+        Monitors search fields and address bars in real-time with zero network latency.
+    </string>
+
+    <string name="disclosure_title">Why FocusLock needs Accessibility access</string>
+    <string name="disclosure_text">FocusLock blocks adult searches and explicit sites on this device. To do that, with your permission it will:\n\n- Read text you type in search fields and browser address bars to detect blocked words. Nothing else is read and nothing is stored. Only words you type can trigger a block. Just reading pages, quizzes or articles never does.\n- Take you to the Home screen the moment a blocked word is typed, an adult site is opened, or the blocked X app is launched.\n- Guard its own settings page, the Private DNS page and the uninstall screen while protection is on, so it cannot be silently switched off.\n- Show you a personal support message when a bypass is attempted.\n- Block completely any apps you choose, and let you switch search-word checking on or off per app.\n\nAll checking happens on this device only. No accounts, no servers, no tracking, no data leaves your phone. You can switch protection off at any time from system Accessibility settings.</string>
+    <string name="accept_continue">I understand — continue</string>
+    <string name="decline">Decline</string>
+    <string name="privacy_title">Privacy Policy</string>
+    <string name="privacy_policy_text">FocusLock collects no personal data.\n\n- Everything the app checks (typed words, visited addresses) is processed in memory on your device and never saved, uploaded or shared.\n- The blocked-attempts log lives only in the running app and is cleared when the app closes.\n- Private DNS filtering is performed by Android and your chosen DNS provider, not by this app.\n- No accounts, no analytics, no advertising identifiers, no third-party SDKs.\n\nIf you have questions, contact the developer through the Play Store listing.</string>
+
+    <string name="deterrent_letter">أنا بعرف ليش إنت هون هسا. مو لأنك شخص سيئ — لأنك بيوم من الأيام قررت إنك تكون أحسن، ونزلت هالتطبيق عشان يساعدك بالضبط بهاي اللحظة، لحظة الضعف.\n\nتذكر شعورك بعد آخر مرة: الندم، والقرف من حالك، والوعد اللي وعدته إنها آخر مرة. هاد الشعور حقيقي، وهو أصدق بكتير من الرغبة اللي حاسسها هسا. الرغبة بتروح بعد عشر دقايق، بس الندم بضل أيام وانت بتعرف هاد الاشي منيح.\n\nالله شايفك هسا، ولسا باب التوبة مفتوح. قال تعالى: قل للمؤمنين يغضوا من أبصارهم ويحفظوا فروجهم. إنت مش لحالك بهالمعركة، وكل مرة بتقاوم فيها إنت أقوى من اللي قبلها، حتى لو وقعت قبل هيك ألف مرة.\n\nسكر هالصفحة. قوم توضا. اطلع امشي. احكي مع حدا بتحبه. لا تضل لحالك مع التلفون بإيدك، لأن الوحدة والفراغ هم أول الطريق.\n\nالقرار قرارك يا صاحبي، وأنا هون بس عشان أذكرك فيه قبل ما تندم.</string>
+
+    <string name="setup_guide_title">FocusLock Setup Guide</string>
+    <string name="setup_guide_content">
+        <![CDATA[
+        <h2>🔒 FocusLock - Complete Setup Guide</h2>
+
+        <h3>Step 1: Enable Accessibility Service</h3>
+        <ol>
+            <li>Open <b>Settings</b> → <b>Accessibility</b> → <b>Installed Services</b></li>
+            <li>Find <b>FocusLock Content Blocker</b> and toggle it <b>ON</b></li>
+            <li>Confirm the permission dialog</li>
+        </ol>
+
+        <h3>Step 2: Configure Private DNS (Network-Level Filtering)</h3>
+        <p>This provides system-wide blocking WITHOUT any VPN, keeping 100% network speed.</p>
+
+        <h4>Option A: Cloudflare Family DNS (Recommended — does not break YouTube)</h4>
+        <ol>
+            <li>Settings → Network & Internet → Private DNS</li>
+            <li>Select <b>Private DNS provider hostname</b></li>
+            <li>Enter: <code>family.cloudflare-dns.com</code></li>
+            <li>Save</li>
+        </ol>
+
+        <h4>Option B: AdGuard Family DNS (stronger, may break YouTube Live)</h4>
+        <ol>
+            <li>Settings → Network & Internet → Private DNS</li>
+            <li>Select <b>Private DNS provider hostname</b></li>
+            <li>Enter: <code>family.adguard-dns.com</code></li>
+            <li>Save</li>
+        </ol>
+
+        <p><b>Alternative (IP-based):</b> If hostname fails, use DNS-over-HTTPS in browser settings or use DNS changer apps that support DoH/DoT with these IPs:</p>
+        <ul>
+            <li>AdGuard Family: 94.140.14.15 / 94.140.15.16</li>
+            <li>Cloudflare Family: 1.1.1.3 / 1.0.0.3</li>
+        </ul>
+
+        <h3>Step 3: Verify Protection</h3>
+        <ul>
+            <li>Open any browser (Chrome, Firefox, Incognito mode)</li>
+            <li>Try searching for blocked terms - should redirect to home screen instantly</li>
+            <li>Try navigating to adult domains - blocked at DNS level</li>
+            <li>Test X (Twitter) and Instagram search bars</li>
+        </ul>
+
+        <h3>How It Works</h3>
+        <ul>
+            <li><b>On-device:</b> AccessibilityService monitors EditText, address bars, search fields in real-time (O(1) HashSet lookup)</li>
+            <li><b>Network-level:</b> Private DNS blocks adult domains before connection (zero VPN, full speed)</li>
+            <li><b>Combined:</b> Dual-layer protection - catches both search queries and direct navigation</li>
+        </ul>
+
+        <h3>Performance</h3>
+        <ul>
+            <li>~50ms notification timeout</li>
+            <li>ConcurrentHashMap for thread-safe O(1) keyword lookup</li>
+            <li>Recycles AccessibilityNodeInfo to prevent memory leaks</li>
+            <li>No background threads, no VPN overhead</li>
+        </ul>
+
+        <h3>Troubleshooting</h3>
+        <ul>
+            <li><b>Service keeps turning off:</b> Disable battery optimization for FocusLock</li>
+            <li><b>Private DNS not working:</b> Some carriers block DoT - use DNS changer app with DoH</li>
+            <li><b>False positives:</b> Report via app feedback - we refine keyword list regularly</li>
+        </ul>
+        ]]>
+    </string>
+    <string name="blocked_apps_title">Blocked apps</string>
+    <string name="blocked_apps_subtitle">Block: app can never open. Skip scan: no search-word checking inside it. Others are search-guarded by default.</string>
+    <string name="apps_search_hint">Search apps…</string>
+    <string name="check_block">Block</string>
+    <string name="check_skip">Skip scan</string>
+    <string name="app_icon_desc">App icon</string>
+    <string name="blocked_apps_footer">Tip: X is blocked by default. Changes apply instantly, even while protection runs.</string>
+    <string name="wizard_apps_title">Choose your blocked apps</string>
+    <string name="wizard_apps_text">Pick any apps that may never open. Every other app stays search-guarded automatically.</string>
+    <string name="blocked_count">%1$d apps blocked</string>
+    <string name="choose_apps">Choose blocked apps</string>
+    <string name="wizard_dns_title">Network filtering</string>
+    <string name="wizard_dns_text">Set Private DNS to family.cloudflare-dns.com for system-wide blocking with zero speed loss. Then enable protection below.</string>
+    <string name="open_dns">Open Private DNS settings</string>
+    <string name="enable_protection">Enable protection</string>
+    <string name="finish_setup">Finish — I am protected</string>
+    <string name="wizard_back">Back</string>
+    <string name="wizard_next">Next</string>
+    <string name="open_blocked_apps">Blocked apps</string>
+    <string name="open_blocked_apps_summary">Choose which apps can never open</string>
+    <string name="setup_wizard_title">Setup wizard</string>
+    <string name="setup_wizard_summary">Step-by-step configuration</string>
+    <string name="allow_word">Allow this word</string>
+
+    <string name="lock_title_set">Generate your recovery phrase</string>
+    <string name="lock_title_change">Re-arm the lock</string>
+    <string name="lock_title_verify">Enter your recovery phrase</string>
+    <string name="lock_body_set">A 200-word phrase was generated below. Tap Copy, paste it into a note, and store it away from this phone. Without it, nobody can switch protection off — including you. That is the deal you are making.</string>
+    <string name="lock_body_change">Paste your current phrase and confirm it. This only re-arms the lock; it does not replace the phrase.</string>
+    <string name="lock_body_verify">Protection is locked. Paste the full 200-word phrase you stored when you armed it.</string>
+    <string name="lock_confirm_pin">Confirm phrase</string>
+    <string name="lock_confirm">Confirm</string>
+    <string name="lock_mismatch">The two phrases do not match.</string>
+    <string name="lock_weak_pin">That is not a valid phrase. It needs all 200 words from the generated list (1000+ characters).</string>
+    <string name="lock_phrase_hint">Paste your full 200-word recovery phrase</string>
+    <string name="lock_copy_phrase">Copy phrase</string>
+    <string name="lock_paste_phrase">Paste phrase</string>
+    <string name="lock_copied">Phrase copied. Paste it into a note and store it away from this phone.</string>
+    <string name="lock_clip_empty">Clipboard is empty.</string>
+    <string name="lock_pasted_words">%1$d words pasted</string>
+    <string name="lock_wrong_pin">Wrong PIN. Try again.</string>
+    <string name="lock_locked_out">Too many wrong tries. Locked for %1$s.</string>
+    <string name="lock_waiting">Cooling-off still running — %1$s left.</string>
+    <string name="lock_wait_title">Cooling-off period</string>
+    <string name="lock_wait_body">You set a %1$s cooling-off period when protection was armed. Wait it out before switching protection off. This is the whole point of the setting: the version of you that wants to disable it is not the version deciding.</string>
+    <string name="lock_time_h">%1$d hours</string>
+    <string name="lock_time_hm">%1$d h %2$d min</string>
+    <string name="lock_time_m">%1$d min</string>
+
+    <string name="lock_state_off">○ Not armed — protection can be switched off freely.</string>
+    <string name="lock_state_no_pin">● Armed, but no phrase set yet. Generate one to make disabling hard.</string>
+    <string name="lock_challenge_title">Type this back to continue</string>
+    <string name="lock_challenge_body">Below are 200 random words. Type them back exactly as written, in order. There is no shortcut and nothing to remember — the point is that it takes real minutes, and those minutes are the lock.</string>
+    <string name="lock_challenge_hint">Type the words above here…</string>
+    <string name="lock_progress">%1$d of %2$d words matched</string>
+    <string name="lock_unlock">Unlock</string>
+    <string name="lock_wrong_phrase">Not an exact match. New challenge generated.</string>
+    <string name="lock_arm_title">Arm the lock</string>
+    <string name="lock_arm_summary">Starts the cooling-off period. Every future disable requires retyping a 200-word challenge.</string>
+    <string name="lock_armed_toast">Lock armed. Cooling-off period has started.</string>
+    <string name="lock_state_on">● Locked — 200-word retype required, cooling-off %1$s.</string>
+    <string name="lock_set_pin">Generate recovery phrase</string>
+    <string name="lock_change_pin">Re-arm lock with current phrase</string>
+    <string name="lock_set_pin_summary">200 random words. Required before protection can be switched off.</string>
+    <string name="lock_cooldown_title">Cooling-off period</string>
+    <string name="lock_cooldown_summary">Minimum time protection stays on after being armed</string>
+    <string name="lock_cooldown_off">No cooling-off</string>
+    <string name="lock_log_title">Audit log</string>
+    <string name="lock_log_summary">Every arm, wrong phrase and refused disable</string>
+    <string name="lock_log_empty">Nothing recorded yet.</string>
+    <string name="lock_channel_name">Lock status</string>
+    <string name="lock_alert_title">FocusLock: protection is off</string>
+    <string name="lock_alert_text">Your lock is armed but the blocking service is not running. Open FocusLock and turn protection back on.</string>
+<string name="watchdog_channel">Protection watchdog</string>
+    <string name="watchdog_title">FocusLock: protection is off</string>
+    <string name="watchdog_text">Your lock is armed but the blocking service is not running. Open FocusLock and switch protection back on.</string>
+    <string name="watchdog_text_cooling">Your lock is armed and the cooling-off period is still running, yet protection is off. Turn it back on.</string>
+
+    <string name="main_tagline">Blocks what you asked it to block. Nothing else.</string>
+    <string name="main_open_accessibility">Turn on search guard</string>
+    <string name="main_toggle_network">Toggle network filter</string>
+    <string name="main_today">Blocked today</string>
+    <string name="main_streak">Day streak</string>
+    <string name="main_view_log">View history</string>
+    <string name="main_settings">Settings</string>
+<string name="main_on">On</string>
+<string name="main_off">Off</string>
+<string name="log_empty">Nothing blocked yet. When the guard stops something, it shows up here.</string>
+
+    <string name="blocks_title">Website &amp; App Blocks</string>
+    <string name="blocks_subtitle">Each block is an independent rule. Toggle it, edit it, or lock it.</string>
+    <string name="blocks_new">+ New block…</string>
+    <string name="blocks_empty">No blocks yet. Tap New block to add one.</string>
+    <string name="block_active">Active</string>
+    <string name="block_inactive">Paused</string>
+    <string name="block_entries">entries</string>
+    <string name="block_chars">%1$d chars</string>
+    <string name="block_locked">🔒 Locked</string>
+
+    <string name="unlock_title">RANDOM TEXT REQUIRED</string>
+    <string name="unlock_body">Type the words below exactly as written to switch this block off.</string>
+    <string name="unlock_prompt">Challenge text</string>
+    <string name="unlock_type_hint">Type the words here…</string>
+    <string name="unlock_action">Unlock</string>
+    <string name="unlock_mismatch">Not an exact match. A new challenge was generated.</string>
+
+    <string name="editor_new">New block</string>
+    <string name="editor_edit">Edit block</string>
+    <string name="editor_save">Save block</string>
+    <string name="editor_untitled">Untitled</string>
+    <string name="field_name">Name</string>
+    <string name="field_type">Type (tap to switch)</string>
+    <string name="field_type_hint">Domains block exact sites. Keywords block searches.</string>
+    <string name="field_terms">Entries (one per line)</string>
+    <string name="field_terms_hint">pornhub.com\nbet365.com</string>
+    <string name="field_lock">Lock this block</string>
+    <string name="field_lock_hint">A locked block needs a random-text challenge before it can be switched off.</string>
+    <string name="field_words">Challenge length — words to retype</string>
+    <string name="field_words_hint">You pick this number. Every time this block is switched off, the app shows this many random words and you must type them back exactly.</string>
+    <string name="kind_domains">Websites / domains</string>
+    <string name="kind_keywords">Search keywords</string>
+
+    <string name="main_manage_blocks">Manage blocks</string>
+<string name="app_blocked_toast">%1$s is blocked</string>
+<string name="dns_protected">DNS is locked by FocusLock</string>
+<string name="main_dns_guard">DNS protection</string>
+<string name="main_dns_on">On — Private DNS cannot be changed</string>
+<string name="main_dns_off">Off — Private DNS can be changed</string>
+<string name="main_change_dns">Change Private DNS</string>
+<string name="dns_unlock_title">Unlock DNS protection</string>
+<string name="dns_unlock_body">Type the words to allow changing Private DNS.</string>
+</resources>

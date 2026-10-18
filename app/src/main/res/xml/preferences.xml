@@ -1,0 +1,36 @@
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <PreferenceCategory android:title="Protection">
+        <Preference
+            android:key="blocked_apps"
+            android:title="@string/open_blocked_apps"
+            android:summary="@string/open_blocked_apps_summary" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Network">
+        <SwitchPreferenceCompat
+            android:key="dns_protection"
+            android:title="@string/main_dns_guard"
+            android:summary="@string/main_dns_on"
+            android:defaultValue="true" />
+        <Preference
+            android:key="open_dns_settings"
+            android:title="Configure Private DNS"
+            android:summary="Optional. For stronger site blocking beyond the built-in network filter." />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="History">
+        <Preference
+            android:key="view_blocked_log"
+            android:title="View Blocked Attempts"
+            android:summary="See what was blocked and when" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="About">
+        <Preference
+            android:key="privacy_policy"
+            android:title="Privacy Policy"
+            android:summary="No data collected. All processing on-device." />
+    </PreferenceCategory>
+
+</PreferenceScreen>

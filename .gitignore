@@ -1,0 +1,15 @@
+# Signing secrets — NEVER commit. Back up focuslock-release.keystore offline.
+keystore.properties
+*.keystore
+*.jks
+# Gradle distributions downloaded locally
+gradle-*/
+gradle-*.zip
+# Build outputs
+build/
+app/build/
+# IDE
+.idea/
+*.iml
+.gradle/
+local.properties
