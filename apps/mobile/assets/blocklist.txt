@@ -1,0 +1,2 @@
+# Adult-only blocking: enforcement lives in adult_domains.txt + adult_keywords.txt.
+# Distraction/social domains are NOT bundled — the user's focus is porn only.

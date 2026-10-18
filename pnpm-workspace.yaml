@@ -1,0 +1,9 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+  - 'server'
+
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  esbuild: true

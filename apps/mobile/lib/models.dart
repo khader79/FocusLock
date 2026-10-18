@@ -1,0 +1,218 @@
+/// Shared models for the FocusLock companion app.
+library;
+
+/// Snapshot of the protection session, mirroring the desktop
+/// `DashboardState` exposed by the preload bridge.
+class FocusState {
+  const FocusState({
+    required this.status,
+    required this.blockedToday,
+    required this.unlockAttempts,
+    required this.customSites,
+    required this.customApps,
+    required this.syncConfigured,
+    required this.difficulty,
+    this.lastUpdate,
+    this.guard = false,
+  });
+
+  factory FocusState.fromMap(Map<dynamic, dynamic> map) {
+    return FocusState(
+      status: map['status'] as String? ?? 'active',
+      blockedToday: map['blockedToday'] as int? ?? 0,
+      lastUpdate: map['lastUpdate'] as String?,
+      unlockAttempts: map['unlockAttempts'] as int? ?? 0,
+      customSites: map['customSites'] as int? ?? 0,
+      customApps: map['customApps'] as int? ?? 0,
+      difficulty: map['difficulty'] as int? ?? 3,
+      syncConfigured: map['syncConfigured'] as bool? ?? false,
+      guard: map['guard'] as bool? ?? false,
+    );
+  }
+
+  final String status;
+  final int blockedToday;
+  final String? lastUpdate;
+  final int unlockAttempts;
+  final int customSites;
+  final int customApps;
+  final int difficulty;
+  final bool syncConfigured;
+
+  /// True when the one-way "strict mode" (الوضع الصارم) is armed.
+  final bool guard;
+
+  bool get active => status == 'active';
+
+  FocusState copyWith({
+    String? status,
+    int? blockedToday,
+    String? lastUpdate,
+    int? unlockAttempts,
+    int? customSites,
+    int? customApps,
+    bool? guard,
+  }) {
+    return FocusState(
+      status: status ?? this.status,
+      blockedToday: blockedToday ?? this.blockedToday,
+      lastUpdate: lastUpdate ?? this.lastUpdate,
+      unlockAttempts: unlockAttempts ?? this.unlockAttempts,
+      customSites: customSites ?? this.customSites,
+      customApps: customApps ?? this.customApps,
+      syncConfigured: syncConfigured,
+      difficulty: difficulty,
+      guard: guard ?? this.guard,
+    );
+  }
+
+  Map<String, Object> toSyncMap() => <String, Object>{
+        'status': status,
+        'blockedToday': blockedToday,
+        'lastUpdate': lastUpdate ?? '',
+        'unlockAttempts': unlockAttempts,
+        'customSites': customSites,
+        'customApps': customApps,
+      };
+}
+
+/// A selectable category (e.g. social media) that resolves to a block pattern.
+class Category {
+  const Category({
+    required this.id,
+    required this.name,
+    required this.pattern,
+    this.enabled = true,
+    this.custom = false,
+  });
+
+  factory Category.fromMap(Map<dynamic, dynamic> map) {
+    return Category(
+      id: map['id'] as String? ?? '',
+      name: map['name'] as String? ?? '',
+      pattern: map['pattern'] as String? ?? '',
+      enabled: map['enabled'] as bool? ?? true,
+      custom: map['custom'] as bool? ?? false,
+    );
+  }
+
+  final String id;
+  final String name;
+
+  /// A domain suffix this category blocks (e.g. "instagram.com" or
+  /// consistent with the blocklist "same matcher" semantics).
+  final String pattern;
+  final bool enabled;
+  final bool custom;
+
+  Map<String, Object> toJson() => <String, Object>{
+        'id': id,
+        'name': name,
+        'pattern': pattern,
+        'enabled': enabled,
+        'custom': custom,
+      };
+}
+
+/// The built-in category set shown on first launch.
+/// Focus/diversion categories ship OFF: the app blocks adult material only
+/// (native list). Social, video, X, TikTok and Facebook are user choices.
+const List<Category> builtInCategories = <Category>[
+  Category(
+    id: 'social',
+    name: 'مواقع التواصل',
+    pattern: 'instagram.com',
+    enabled: false,
+  ),
+  Category(
+    id: 'video',
+    name: 'الفيديو',
+    pattern: 'youtube.com',
+    enabled: false,
+  ),
+  Category(
+    id: 'x',
+    name: 'إكس',
+    pattern: 'x.com',
+    enabled: false,
+  ),
+  Category(
+    id: 'tiktok',
+    name: 'تيك توك',
+    pattern: 'tiktok.com',
+    enabled: false,
+  ),
+  Category(
+    id: 'facebook',
+    name: 'فيسبوك',
+    pattern: 'facebook.com',
+    enabled: false,
+  ),
+  Category(
+    id: 'shopping',
+    name: 'التسوق',
+    pattern: 'amazon.com',
+    enabled: false,
+  ),
+];
+
+/// Live health snapshot of the protective layers, refreshed by the dashboard.
+/// Mirrors the native `focuslock/watchdog.status` map.
+class HealthStatus {
+  const HealthStatus({
+    required this.protected,
+    required this.primaryRunning,
+    required this.accessibilityEnabled,
+    required this.batteryExempt,
+    required this.canScheduleExactAlarms,
+    required this.vpnActive,
+    required this.notificationsEnabled,
+    required this.networkType,
+    required this.heartbeatAgeMs,
+  });
+
+  factory HealthStatus.fromMap(Map<dynamic, dynamic> map) {
+    return HealthStatus(
+      protected: map['protected'] as bool? ?? false,
+      primaryRunning: map['primaryRunning'] as bool? ?? false,
+      accessibilityEnabled: map['accessibilityEnabled'] as bool? ?? false,
+      batteryExempt: map['batteryExempt'] as bool? ?? false,
+      canScheduleExactAlarms: map['canScheduleExactAlarms'] as bool? ?? false,
+      vpnActive: map['vpnActive'] as bool? ?? false,
+      notificationsEnabled: map['notificationsEnabled'] as bool? ?? false,
+      networkType: map['networkType'] as String? ?? 'none',
+      heartbeatAgeMs: map['heartbeatAgeMs'] as int? ?? 0,
+    );
+  }
+
+  final bool protected;
+  final bool primaryRunning;
+  final bool accessibilityEnabled;
+  final bool batteryExempt;
+  final bool canScheduleExactAlarms;
+  final bool vpnActive;
+  final bool notificationsEnabled;
+
+  /// "wifi" | "mobile" | "other" | "none".
+  final String networkType;
+  final int heartbeatAgeMs;
+
+  /// Rough UI label for the active network transport.
+  String get networkLabel => switch (networkType) {
+        'wifi' => 'Wi-Fi',
+        'mobile' => 'شبكة خلوية',
+        'none' => 'لا اتصال',
+        _ => 'شبكة أخرى',
+      };
+
+  /// The accessibility guard counts as alive while its heartbeat is fresh.
+  bool get guardAlive =>
+      accessibilityEnabled && heartbeatAgeMs >= 0 && heartbeatAgeMs < 60_000;
+
+  bool get allHealthy =>
+      vpnActive &&
+      primaryRunning &&
+      guardAlive &&
+      notificationsEnabled &&
+      batteryExempt;
+}
